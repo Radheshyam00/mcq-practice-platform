@@ -1,8 +1,188 @@
-"use client";
-import type { Question } from "@/types/question";
-import { OptionButton } from "./OptionButton";
-import { Badge } from "@/components/common/Badge";
 
-export function QuestionCard({ question, selected, showAnswer, onSelect }: { question: Question; selected?: string; showAnswer?: boolean; onSelect: (id: string) => void }) {
-  return <div className="rounded-2xl border bg-white p-6 dark:border-slate-800 dark:bg-slate-900"><div className="flex justify-between gap-4"><Badge>{question.difficulty}</Badge><span className="text-xs text-slate-500">{question.tags.join(" • ")}</span></div><h2 className="mt-5 text-xl font-bold leading-8">{question.question}</h2><div className="mt-6 grid gap-3">{question.options.map((o)=><OptionButton key={o.id} id={o.id} text={o.text} selected={selected===o.id} correct={showAnswer && o.id===question.correctOptionId} wrong={showAnswer && selected===o.id && o.id!==question.correctOptionId} disabled={showAnswer} onClick={()=>onSelect(o.id)}/>)}</div></div>;
+"use client";
+
+import { BookOpen, Tag } from "lucide-react";
+import type { Question } from "@/types/question";
+
+import { Badge } from "@/components/common/Badge";
+import { OptionButton } from "./OptionButton";
+
+type QuestionCardProps = {
+  question: Question;
+  selected?: string;
+  showAnswer?: boolean;
+  onSelect: (id: string) => void;
+};
+
+export function QuestionCard({
+  question,
+  selected,
+  showAnswer = false,
+  onSelect,
+}: QuestionCardProps) {
+  return (
+    <article
+      className="
+        overflow-hidden rounded-3xl
+        border border-slate-200
+        bg-white
+        shadow-sm
+        transition-shadow duration-200
+        hover:shadow-md
+        dark:border-slate-800
+        dark:bg-slate-900
+      "
+    >
+      {/* Header */}
+      <div
+        className="
+          border-b border-slate-200
+          bg-slate-50/70
+          px-5 py-4
+          dark:border-slate-800
+          dark:bg-slate-950/40
+          sm:px-6
+        "
+      >
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          {/* Difficulty */}
+          <div className="flex items-center gap-2">
+            <Badge>{question.difficulty}</Badge>
+
+            {showAnswer && (
+              <span
+                className="
+                  inline-flex items-center gap-1.5 rounded-full
+                  border border-slate-200
+                  bg-white px-2.5 py-1
+                  text-xs font-semibold text-slate-600
+                  dark:border-slate-700
+                  dark:bg-slate-900
+                  dark:text-slate-300
+                "
+              >
+                <BookOpen className="h-3.5 w-3.5" aria-hidden="true" />
+                Answer review
+              </span>
+            )}
+          </div>
+
+          {/* Tags */}
+          {question.tags.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <Tag
+                className="h-3.5 w-3.5 shrink-0 text-slate-400"
+                aria-hidden="true"
+              />
+
+              {question.tags.map((tag) => (
+                <span
+                  key={tag}
+                  className="
+                    rounded-full
+                    bg-slate-100
+                    px-2.5 py-1
+                    text-xs font-medium
+                    text-slate-600
+                    dark:bg-slate-800
+                    dark:text-slate-300
+                  "
+                >
+                  {tag}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Question */}
+      <div className="px-5 py-6 sm:px-7 sm:py-7">
+        <div className="flex gap-4">
+          {/* Question number indicator */}
+          <div
+            className="
+              hidden h-9 w-9 shrink-0 items-center justify-center
+              rounded-xl
+              bg-indigo-50
+              text-sm font-black text-indigo-600
+              dark:bg-indigo-500/10
+              dark:text-indigo-400
+              sm:flex
+            "
+          >
+            ?
+          </div>
+
+          <div className="min-w-0 flex-1">
+            <p
+              className="
+                mb-2 text-xs font-bold uppercase tracking-wider
+                text-slate-400
+                dark:text-slate-500
+              "
+            >
+              Question
+            </p>
+
+            <h2
+              className="
+                text-lg font-bold leading-8
+                text-slate-900
+                dark:text-white
+                sm:text-xl
+              "
+            >
+              {question.question}
+            </h2>
+          </div>
+        </div>
+
+        {/* Options */}
+        <div className="mt-7 space-y-3">
+          {question.options.map((option, index) => (
+            <OptionButton
+              key={option.id}
+              id={option.id}
+              text={option.text}
+              selected={selected === option.id}
+              correct={
+                showAnswer && option.id === question.correctOptionId
+              }
+              wrong={
+                showAnswer &&
+                selected === option.id &&
+                option.id !== question.correctOptionId
+              }
+              disabled={showAnswer}
+              onClick={() => onSelect(option.id)}
+            />
+          ))}
+        </div>
+
+        {/* Answer status */}
+        {showAnswer && (
+          <div
+            className="
+              mt-6 rounded-2xl
+              border border-slate-200
+              bg-slate-50
+              px-4 py-3
+              dark:border-slate-800
+              dark:bg-slate-950/60
+            "
+          >
+            <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
+              Correct answer
+            </p>
+
+            <p className="mt-1 text-sm font-bold text-slate-900 dark:text-white">
+              Option {question.correctOptionId}
+            </p>
+          </div>
+        )}
+      </div>
+    </article>
+  );
 }
+
