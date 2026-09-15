@@ -6,6 +6,9 @@ const links = [
   { href: "/mock-tests", label: "Mock Tests" },
   { href: "/daily-quiz", label: "Daily Quiz" },
   { href: "/leaderboard", label: "Leaderboard" },
+  { href: "/admin/login", label: "Admin" },
+  { href: "/login", label: "Users" },
+
 ];
 
 export function Navbar() {
