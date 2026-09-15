@@ -1,0 +1,2 @@
+import { questions } from "@/data/questions";
+export function QuestionTable() { return <div className="overflow-x-auto rounded-2xl border dark:border-slate-800"><table className="w-full text-left text-sm"><thead className="bg-slate-50 dark:bg-slate-900"><tr><th className="p-4">Question</th><th>Exam</th><th>Difficulty</th></tr></thead><tbody>{questions.map(q=><tr key={q.id} className="border-t dark:border-slate-800"><td className="p-4">{q.question}</td><td>{q.examSlug}</td><td>{q.difficulty}</td></tr>)}</tbody></table></div>; }

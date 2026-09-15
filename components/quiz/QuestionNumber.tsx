@@ -1,0 +1,1 @@
+export function QuestionNumber({ number, total }: { number: number; total: number }) { return <div className="text-sm font-bold text-slate-500">Question {number} <span className="font-normal">of {total}</span></div>; }

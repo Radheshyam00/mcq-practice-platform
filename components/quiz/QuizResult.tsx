@@ -1,0 +1,4 @@
+import Link from "next/link";
+export function QuizResult({ result }: { result: { total:number; correct:number; wrong:number; skipped:number; percentage:number } }) {
+  return <div className="rounded-2xl border bg-white p-8 text-center dark:border-slate-800 dark:bg-slate-900"><div className="mx-auto flex h-24 w-24 items-center justify-center rounded-full bg-indigo-50 text-3xl font-black text-indigo-600 dark:bg-indigo-950">{result.percentage}%</div><h2 className="mt-5 text-2xl font-black">Quiz completed!</h2><div className="mx-auto mt-6 grid max-w-lg grid-cols-3 gap-3"><div><b>{result.correct}</b><p className="text-xs text-slate-500">Correct</p></div><div><b>{result.wrong}</b><p className="text-xs text-slate-500">Wrong</p></div><div><b>{result.skipped}</b><p className="text-xs text-slate-500">Skipped</p></div></div><Link href="/exams" className="mt-8 inline-flex rounded-xl bg-indigo-600 px-5 py-3 font-bold text-white">Practice Again</Link></div>;
+}

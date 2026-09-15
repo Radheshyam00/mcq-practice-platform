@@ -1,0 +1,1 @@
+export function TestHeader({ title }: { title: string }) { return <div className="rounded-2xl bg-slate-950 p-7 text-white"><h1 className="text-2xl font-black">{title}</h1><p className="mt-2 text-sm text-slate-400">Timed mock test</p></div>; }

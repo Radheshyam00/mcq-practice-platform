@@ -1,0 +1,11 @@
+@import "tailwindcss";
+
+:root { color-scheme: light; }
+.dark { color-scheme: dark; }
+
+html { scroll-behavior: smooth; }
+body { min-height: 100vh; background: #fff; color: #0f172a; }
+.dark body { background: #020617; color: #f8fafc; }
+
+button, a, input, textarea, select { -webkit-tap-highlight-color: transparent; }
+::selection { background: rgb(99 102 241 / .25); }

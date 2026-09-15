@@ -1,0 +1,3 @@
+import { subjects } from "@/data/subjects";
+import Link from "next/link";
+export default function SubjectsPage(){return <div className="mx-auto max-w-7xl px-4 py-12"><h1 className="text-4xl font-black">Subjects</h1><p className="mt-2 text-slate-500">Practice by subject.</p><div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">{subjects.map(s=><Link href={`/subjects/${s.slug}`} key={s.slug} className="rounded-2xl border p-6 hover:border-indigo-400 dark:border-slate-800"><div className="text-3xl">{s.icon}</div><h2 className="mt-4 font-bold">{s.name}</h2><p className="mt-2 text-sm text-slate-500">{s.description}</p></Link>)}</div></div>;}

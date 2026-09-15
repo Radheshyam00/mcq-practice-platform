@@ -1,0 +1,2 @@
+import { CheckCircle2 } from "lucide-react";
+export function Explanation({ text }: { text: string }) { return <div className="mt-5 rounded-xl bg-emerald-50 p-4 dark:bg-emerald-950/30"><div className="flex items-center gap-2 font-bold text-emerald-700 dark:text-emerald-300"><CheckCircle2 size={18}/> Explanation</div><p className="mt-2 text-sm leading-6 text-slate-700 dark:text-slate-300">{text}</p></div>; }

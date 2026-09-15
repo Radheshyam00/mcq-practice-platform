@@ -1,0 +1,3 @@
+"use client";
+import { Button } from "@/components/common/Button";
+export default function ContactPage(){return <div className="mx-auto max-w-2xl px-4 py-16"><h1 className="text-4xl font-black">Contact</h1><form className="mt-8 grid gap-4" onSubmit={e=>{e.preventDefault();alert("Thanks! This demo form is not connected to an email service yet.");}}><input required placeholder="Your name" className="rounded-xl border p-3 dark:border-slate-700 dark:bg-slate-900"/><input required type="email" placeholder="Email address" className="rounded-xl border p-3 dark:border-slate-700 dark:bg-slate-900"/><textarea required rows={6} placeholder="Message" className="rounded-xl border p-3 dark:border-slate-700 dark:bg-slate-900"/><Button type="submit">Send Message</Button></form></div>;}
