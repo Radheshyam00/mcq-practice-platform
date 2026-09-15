@@ -1,11 +1,37 @@
 import Link from "next/link";
 
+const links = [
+  { href: "/exams", label: "Exams" },
+  { href: "/subjects", label: "Subjects" },
+  { href: "/mock-tests", label: "Mock Tests" },
+  { href: "/daily-quiz", label: "Daily Quiz" },
+  { href: "/leaderboard", label: "Leaderboard" },
+];
+
 export function Navbar() {
-  return <nav className="hidden items-center gap-6 md:flex">
-    <Link href="/exams" className="text-sm font-medium hover:text-indigo-600">Exams</Link>
-    <Link href="/subjects" className="text-sm font-medium hover:text-indigo-600">Subjects</Link>
-    <Link href="/mock-tests" className="text-sm font-medium hover:text-indigo-600">Mock Tests</Link>
-    <Link href="/daily-quiz" className="text-sm font-medium hover:text-indigo-600">Daily Quiz</Link>
-    <Link href="/leaderboard" className="text-sm font-medium hover:text-indigo-600">Leaderboard</Link>
-  </nav>;
+  return (
+    <nav className="hidden items-center gap-1 lg:flex">
+      {links.map((link) => (
+        <Link
+          key={link.href}
+          href={link.href}
+          className="
+            rounded-xl px-3 py-2
+            text-sm font-semibold
+            text-slate-700
+            transition-all duration-200
+
+            hover:bg-slate-100
+            hover:text-indigo-600
+
+            dark:text-slate-300
+            dark:hover:bg-slate-800
+            dark:hover:text-indigo-400
+          "
+        >
+          {link.label}
+        </Link>
+      ))}
+    </nav>
+  );
 }

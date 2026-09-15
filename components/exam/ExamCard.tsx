@@ -1,3 +1,15 @@
+
 import type { Exam } from "@/types/exam";
 import { ExamCard as HomeExamCard } from "@/components/home/ExamCard";
-export function ExamCard({ exam }: { exam: Exam }) { return <HomeExamCard exam={exam}/>; }
+
+interface ExamCardProps {
+  exam: Exam;
+}
+
+export function ExamCard({ exam }: ExamCardProps) {
+  return (
+    <div className="h-full min-w-0">
+      <HomeExamCard exam={exam} />
+    </div>
+  );
+}
