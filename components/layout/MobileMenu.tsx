@@ -7,7 +7,9 @@ import {
   Home,
   LayoutGrid,
   ListChecks,
+  LogIn,
   Menu,
+  ShieldCheck,
   Trophy,
   X,
 } from "lucide-react";
@@ -43,6 +45,16 @@ const menuItems = [
     href: "/leaderboard",
     label: "Leaderboard",
     icon: Trophy,
+  },
+  {
+    href: "/admin/login",
+    label: "Admin Login",
+    icon: ShieldCheck,
+  },
+  {
+    href: "login",
+    label: "Login",
+    icon: LogIn,
   },
 ];
 
