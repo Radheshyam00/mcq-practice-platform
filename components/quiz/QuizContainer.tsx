@@ -1,7 +1,6 @@
-
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import {
   CheckCircle2,
   ChevronLeft,
@@ -27,14 +26,37 @@ import type { Question } from "@/types/question";
 type QuizContainerProps = {
   questions: Question[];
   durationMinutes?: number;
+
+  examId?: string;
+  examName?: string;
+
+  resultType?: "practice" | "mock-test" | "daily-quiz";
 };
 
 export function QuizContainer({
   questions,
   durationMinutes = 30,
+  examId,
+  examName,
+  resultType = "practice",
 }: QuizContainerProps) {
   const quiz = useQuiz(questions);
 
+  /*
+   * Prevent duplicate result submissions.
+   */
+  const resultSaved = useRef(false);
+
+  /*
+   * Store the starting time.
+   *
+   * This allows us to calculate the actual time taken.
+   */
+  const startTimeRef = useRef<number>(Date.now());
+
+  /*
+   * Timer finish
+   */
   const finish = useCallback(() => {
     quiz.submit();
   }, [quiz]);
@@ -42,9 +64,220 @@ export function QuizContainer({
   const timer = useTimer(
     durationMinutes * 60,
     !quiz.submitted,
-    finish,
+    finish
   );
 
+  /*
+   * Save result after quiz is submitted.
+   */
+  useEffect(() => {
+    if (!quiz.submitted) {
+      return;
+    }
+
+    /*
+     * Don't save more than once.
+     */
+    if (resultSaved.current) {
+      return;
+    }
+
+    /*
+     * examId is required by Result model.
+     */
+    if (!examId) {
+      console.error(
+        "RESULT NOT SAVED: examId is missing."
+      );
+
+      return;
+    }
+
+    resultSaved.current = true;
+
+    const saveResult = async () => {
+      try {
+        /*
+         * Count answered questions.
+         */
+        const answeredCount = questions.filter(
+          (question) => {
+            const answer =
+              quiz.answers[question.id];
+
+            return (
+              answer !== undefined &&
+              answer !== null &&
+              answer !== ""
+            );
+          }
+        ).length;
+
+        /*
+         * Calculate correct answers.
+         *
+         * New MongoDB question structure:
+         *
+         * options: string[]
+         * correctAnswer: number
+         *
+         * Answers from QuestionCard are expected
+         * to be "0", "1", "2", or "3".
+         */
+        const getCorrectAnswerIndex = (
+          item: Question
+        ): number => {
+          const rawQuestion = item as {
+            correctAnswer?: number;
+            answerIndex?: number;
+            correctOptionIndex?: number;
+          };
+
+          if (
+            typeof rawQuestion.correctAnswer === "number"
+          ) {
+            return rawQuestion.correctAnswer;
+          }
+
+          if (
+            typeof rawQuestion.answerIndex === "number"
+          ) {
+            return rawQuestion.answerIndex;
+          }
+
+          if (
+            typeof rawQuestion.correctOptionIndex === "number"
+          ) {
+            return rawQuestion.correctOptionIndex;
+          }
+
+          return -1;
+        };
+
+        let correct = 0;
+
+        questions.forEach((question) => {
+          const answer =
+            quiz.answers[question.id];
+
+          if (
+            answer === undefined ||
+            answer === null ||
+            answer === ""
+          ) {
+            return;
+          }
+
+          const selectedIndex = Number(answer);
+          const correctAnswerIndex =
+            getCorrectAnswerIndex(question);
+
+          if (
+            !Number.isNaN(selectedIndex) &&
+            selectedIndex === correctAnswerIndex
+          ) {
+            correct++;
+          }
+        });
+
+        const totalQuestions =
+          questions.length;
+
+        const wrong =
+          answeredCount - correct;
+
+        const skipped =
+          totalQuestions - answeredCount;
+
+        /*
+         * Calculate actual time taken.
+         */
+        const elapsedSeconds = Math.floor(
+          (Date.now() - startTimeRef.current) /
+            1000
+        );
+
+        /*
+         * Never allow time to exceed the quiz duration.
+         */
+        const timeTakenSeconds = Math.min(
+          elapsedSeconds,
+          durationMinutes * 60
+        );
+
+        /*
+         * Send result to MongoDB API.
+         */
+        const response = await fetch(
+          "/api/results",
+          {
+            method: "POST",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+
+            body: JSON.stringify({
+              examId,
+              examName,
+              correct,
+              wrong,
+              skipped,
+              totalQuestions,
+              timeTakenSeconds,
+              type: resultType,
+            }),
+          }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          console.error(
+            "FAILED TO SAVE RESULT:",
+            data.message || data
+          );
+
+          /*
+           * Allow another save attempt.
+           */
+          resultSaved.current = false;
+
+          return;
+        }
+
+        console.log(
+          "RESULT SAVED SUCCESSFULLY:",
+          data.result
+        );
+      } catch (error) {
+        console.error(
+          "ERROR SAVING RESULT:",
+          error
+        );
+
+        /*
+         * Allow retry if request failed.
+         */
+        resultSaved.current = false;
+      }
+    };
+
+    saveResult();
+  }, [
+    quiz.submitted,
+    quiz.answers,
+    questions,
+    examId,
+    examName,
+    resultType,
+    durationMinutes,
+  ]);
+
+  /*
+   * No questions
+   */
   if (!questions.length) {
     return (
       <div
@@ -68,7 +301,10 @@ export function QuizContainer({
             dark:text-slate-400
           "
         >
-          <ListChecks className="h-7 w-7" aria-hidden="true" />
+          <ListChecks
+            className="h-7 w-7"
+            aria-hidden="true"
+          />
         </div>
 
         <h2 className="mt-5 text-xl font-bold text-slate-900 dark:text-white">
@@ -76,28 +312,49 @@ export function QuizContainer({
         </h2>
 
         <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
-          There are currently no questions available for this quiz.
-          Please try again later.
+          There are currently no questions available
+          for this quiz. Please try again later.
         </p>
       </div>
     );
   }
 
+  /*
+   * Quiz submitted
+   */
   if (quiz.submitted) {
-    return <QuizResult result={quiz.result} />;
+    return (
+      <QuizResult result={quiz.result} />
+    );
   }
 
   const currentQuestion = quiz.current;
-  const currentAnswer = quiz.answers[currentQuestion.id];
-  const isMarked = quiz.marked.includes(currentQuestion.id);
-  const isFirstQuestion = quiz.currentIndex === 0;
+
+  const currentAnswer =
+    quiz.answers[currentQuestion.id];
+
+  const isMarked = quiz.marked.includes(
+    currentQuestion.id
+  );
+
+  const isFirstQuestion =
+    quiz.currentIndex === 0;
+
   const isLastQuestion =
-    quiz.currentIndex === questions.length - 1;
+    quiz.currentIndex ===
+    questions.length - 1;
 
   const answeredCount = questions.filter(
-    (question) =>
-      quiz.answers[question.id] !== undefined &&
-      quiz.answers[question.id] !== "",
+    (question) => {
+      const answer =
+        quiz.answers[question.id];
+
+      return (
+        answer !== undefined &&
+        answer !== null &&
+        answer !== ""
+      );
+    }
   ).length;
 
   return (
@@ -125,7 +382,10 @@ export function QuizContainer({
                 dark:text-indigo-400
               "
             >
-              <ListChecks className="h-5 w-5" aria-hidden="true" />
+              <ListChecks
+                className="h-5 w-5"
+                aria-hidden="true"
+              />
             </div>
 
             <div>
@@ -134,7 +394,9 @@ export function QuizContainer({
               </p>
 
               <p className="mt-0.5 text-sm font-semibold text-slate-800 dark:text-slate-200">
-                Question {quiz.currentIndex + 1} of {questions.length}
+                Question{" "}
+                {quiz.currentIndex + 1} of{" "}
+                {questions.length}
               </p>
             </div>
           </div>
@@ -155,7 +417,9 @@ export function QuizContainer({
               Time remaining
             </span>
 
-            <QuizTimer seconds={timer.seconds} />
+            <QuizTimer
+              seconds={timer.seconds}
+            />
           </div>
         </div>
       </div>
@@ -211,9 +475,12 @@ export function QuizContainer({
           />
 
           {/* Explanation */}
-          {currentAnswer && (
-            <Explanation text={currentQuestion.explanation} />
-          )}
+          {currentAnswer !== undefined &&
+            currentAnswer !== "" && (
+              <Explanation
+                text={currentQuestion.explanation}
+              />
+            )}
 
           {/* Bottom navigation */}
           <div
@@ -239,6 +506,7 @@ export function QuizContainer({
                   className="mr-1 h-4 w-4"
                   aria-hidden="true"
                 />
+
                 Previous
               </Button>
 
@@ -251,11 +519,17 @@ export function QuizContainer({
                 >
                   <Flag
                     className="mr-1.5 h-4 w-4"
-                    fill={isMarked ? "currentColor" : "none"}
+                    fill={
+                      isMarked
+                        ? "currentColor"
+                        : "none"
+                    }
                     aria-hidden="true"
                   />
 
-                  {isMarked ? "Unmark" : "Mark"}
+                  {isMarked
+                    ? "Unmark"
+                    : "Mark"}
                 </Button>
 
                 {isLastQuestion ? (
@@ -268,6 +542,7 @@ export function QuizContainer({
                       className="mr-1.5 h-4 w-4"
                       aria-hidden="true"
                     />
+
                     Submit
                   </Button>
                 ) : (
@@ -276,6 +551,7 @@ export function QuizContainer({
                     className="flex-1 sm:flex-none"
                   >
                     Next
+
                     <ChevronRight
                       className="ml-1 h-4 w-4"
                       aria-hidden="true"
@@ -285,16 +561,19 @@ export function QuizContainer({
               </div>
             </div>
 
-            {/* Mobile progress text */}
+            {/* Mobile progress */}
             <div className="mt-4 border-t border-slate-100 pt-3 dark:border-slate-800 sm:hidden">
               <div className="flex items-center justify-between text-xs">
                 <span className="text-slate-500 dark:text-slate-400">
-                  {answeredCount} of {questions.length} answered
+                  {answeredCount} of{" "}
+                  {questions.length} answered
                 </span>
 
                 <span className="font-semibold text-slate-700 dark:text-slate-300">
                   {Math.round(
-                    (answeredCount / questions.length) * 100,
+                    (answeredCount /
+                      questions.length) *
+                      100
                   )}
                   %
                 </span>
@@ -315,7 +594,6 @@ export function QuizContainer({
               dark:bg-slate-900
             "
           >
-            {/* Sidebar header */}
             <div
               className="
                 border-b border-slate-200
@@ -332,7 +610,8 @@ export function QuizContainer({
                   </h3>
 
                   <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                    {answeredCount}/{questions.length} answered
+                    {answeredCount}/
+                    {questions.length} answered
                   </p>
                 </div>
 
@@ -351,7 +630,6 @@ export function QuizContainer({
               </div>
             </div>
 
-            {/* Progress */}
             <div className="px-5 pt-5">
               <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
                 <div
@@ -359,7 +637,9 @@ export function QuizContainer({
                   style={{
                     width: `${
                       questions.length > 0
-                        ? (answeredCount / questions.length) * 100
+                        ? (answeredCount /
+                            questions.length) *
+                          100
                         : 0
                     }%`,
                   }}
@@ -367,101 +647,117 @@ export function QuizContainer({
               </div>
             </div>
 
-            {/* Palette */}
             <div className="p-5">
               <div className="grid grid-cols-5 gap-2">
-                {questions.map((question, index) => {
-                  const isCurrent =
-                    index === quiz.currentIndex;
+                {questions.map(
+                  (question, index) => {
+                    const isCurrent =
+                      index ===
+                      quiz.currentIndex;
 
-                  const isAnswered =
-                    quiz.answers[question.id] !== undefined &&
-                    quiz.answers[question.id] !== "";
+                    const answer =
+                      quiz.answers[
+                        question.id
+                      ];
 
-                  const questionMarked =
-                    quiz.marked.includes(question.id);
+                    const isAnswered =
+                      answer !== undefined &&
+                      answer !== null &&
+                      answer !== "";
 
-                  return (
-                    <button
-                      key={question.id}
-                      type="button"
-                      onClick={() => quiz.goTo(index)}
-                      aria-label={`Go to question ${index + 1}${
-                        isAnswered
-                          ? ", answered"
-                          : ", unanswered"
-                      }${
-                        questionMarked
-                          ? ", marked for review"
-                          : ""
-                      }`}
-                      aria-current={
-                        isCurrent ? "step" : undefined
-                      }
-                      className={`
-                        relative flex aspect-square
-                        items-center justify-center
-                        rounded-xl border
-                        text-sm font-bold
-                        transition-all duration-200
-                        focus:outline-none
-                        focus-visible:ring-2
-                        focus-visible:ring-indigo-500
-                        focus-visible:ring-offset-2
-                        dark:focus-visible:ring-offset-slate-900
+                    const questionMarked =
+                      quiz.marked.includes(
+                        question.id
+                      );
 
-                        ${
-                          isCurrent
-                            ? "border-indigo-600 bg-indigo-600 text-white shadow-md shadow-indigo-500/20 dark:border-indigo-500 dark:bg-indigo-500"
-                            : isAnswered
-                              ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-400 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300"
-                              : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:bg-indigo-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-indigo-500/60 dark:hover:bg-indigo-950/30"
+                    return (
+                      <button
+                        key={question.id}
+                        type="button"
+                        onClick={() =>
+                          quiz.goTo(index)
                         }
-                      `}
-                    >
-                      {index + 1}
+                        aria-label={`Go to question ${
+                          index + 1
+                        }${
+                          isAnswered
+                            ? ", answered"
+                            : ", unanswered"
+                        }${
+                          questionMarked
+                            ? ", marked for review"
+                            : ""
+                        }`}
+                        aria-current={
+                          isCurrent
+                            ? "step"
+                            : undefined
+                        }
+                        className={`
+                          relative flex aspect-square
+                          items-center justify-center
+                          rounded-xl border
+                          text-sm font-bold
+                          transition-all duration-200
+                          focus:outline-none
+                          focus-visible:ring-2
+                          focus-visible:ring-indigo-500
+                          focus-visible:ring-offset-2
+                          dark:focus-visible:ring-offset-slate-900
 
-                      {isAnswered && !isCurrent && (
-                        <CheckCircle2
-                          className="
-                            absolute -right-1 -top-1
-                            h-4 w-4
-                            rounded-full
-                            bg-white
-                            text-emerald-500
-                            dark:bg-slate-900
-                          "
-                          aria-hidden="true"
-                        />
-                      )}
+                          ${
+                            isCurrent
+                              ? "border-indigo-600 bg-indigo-600 text-white shadow-md shadow-indigo-500/20 dark:border-indigo-500 dark:bg-indigo-500"
+                              : isAnswered
+                                ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-400 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300"
+                                : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:bg-indigo-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-indigo-500/60 dark:hover:bg-indigo-950/30"
+                          }
+                        `}
+                      >
+                        {index + 1}
 
-                      {questionMarked && (
-                        <span
-                          className="
-                            absolute -bottom-1 -right-1
-                            flex h-4 w-4
-                            items-center justify-center
-                            rounded-full
-                            bg-amber-500
-                            text-white
-                            ring-2 ring-white
-                            dark:ring-slate-900
-                          "
-                        >
-                          <Flag
-                            className="h-2.5 w-2.5"
-                            fill="currentColor"
-                            aria-hidden="true"
-                          />
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
+                        {isAnswered &&
+                          !isCurrent && (
+                            <CheckCircle2
+                              className="
+                                absolute -right-1 -top-1
+                                h-4 w-4
+                                rounded-full
+                                bg-white
+                                text-emerald-500
+                                dark:bg-slate-900
+                              "
+                              aria-hidden="true"
+                            />
+                          )}
+
+                        {questionMarked && (
+                          <span
+                            className="
+                              absolute -bottom-1 -right-1
+                              flex h-4 w-4
+                              items-center justify-center
+                              rounded-full
+                              bg-amber-500
+                              text-white
+                              ring-2 ring-white
+                              dark:ring-slate-900
+                            "
+                          >
+                            <Flag
+                              className="h-2.5 w-2.5"
+                              fill="currentColor"
+                              aria-hidden="true"
+                            />
+                          </span>
+                        )}
+                      </button>
+                    );
+                  }
+                )}
               </div>
             </div>
 
-            {/* Legend */}
             <div
               className="
                 border-t border-slate-200
@@ -519,4 +815,3 @@ function Legend({
     </div>
   );
 }
-

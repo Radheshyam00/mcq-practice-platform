@@ -1,151 +1,268 @@
+"use client";
 
 import Link from "next/link";
+import { useEffect, useState } from "react";
 import {
   ArrowLeft,
-  Edit3,
+  Edit,
   FileQuestion,
   Plus,
   Search,
   Trash2,
+  Upload,
 } from "lucide-react";
 
-import { questions } from "@/data/questions";
+type Question = {
+  _id: string;
+  question: string;
+  options: string[];
+  correctAnswer: number;
+  subject: string;
+  topic: string;
+  exam: string;
+  difficulty: "Easy" | "Medium" | "Hard";
+  isDailyQuiz: boolean;
+  isActive: boolean;
+};
 
-export default function AdminQuestionsPage() {
+export default function QuestionsPage() {
+  const [questions, setQuestions] = useState<Question[]>([]);
+  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  async function loadQuestions() {
+    try {
+      setLoading(true);
+
+      const response = await fetch(
+        `/api/admin/questions?search=${encodeURIComponent(search)}`
+      );
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setQuestions(data.questions || []);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadQuestions();
+  }, []);
+
+  async function deleteQuestion(id: string) {
+    const confirmed = window.confirm(
+      "Are you sure you want to delete this question?"
+    );
+
+    if (!confirmed) return;
+
+    const response = await fetch(`/api/admin/questions/${id}`, {
+      method: "DELETE",
+    });
+
+    if (response.ok) {
+      setQuestions((current) =>
+        current.filter((question) => question._id !== id)
+      );
+    }
+  }
+
   return (
-    <main className="min-h-screen bg-slate-50 dark:bg-slate-950">
+    <main className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-white">
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
-        <Link
-          href="/admin"
-          className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-sm font-semibold text-slate-600 shadow-sm dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          Admin Dashboard
-        </Link>
+        {/* Header */}
+        <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
+          <div>
+            <Link
+              href="/admin/dashboard"
+              className="mb-3 inline-flex items-center gap-2 text-sm font-bold text-slate-500 hover:text-indigo-600"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Dashboard
+            </Link>
 
-        <section className="mt-6 rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex flex-col gap-5 border-b border-slate-200 p-5 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800">
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400">
-                <FileQuestion className="h-5 w-5" />
-              </div>
+            <h1 className="text-3xl font-black tracking-tight">
+              Question Bank
+            </h1>
 
-              <div>
-                <h1 className="text-2xl font-black">Questions</h1>
-                <p className="text-sm text-slate-500 dark:text-slate-400">
-                  Manage your MCQ question bank.
-                </p>
-              </div>
-            </div>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              Add, edit, delete and organize your MCQ questions.
+            </p>
+          </div>
 
-            <button
-              type="button"
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-indigo-700"
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href="/admin/questions/import"
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-bold shadow-sm hover:bg-slate-50 dark:border-slate-800 dark:bg-slate-900 dark:hover:bg-slate-800"
+            >
+              <Upload className="h-4 w-4" />
+              Import
+            </Link>
+
+            <Link
+              href="/admin/questions/new"
+              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm hover:bg-indigo-700"
             >
               <Plus className="h-4 w-4" />
               Add Question
-            </button>
+            </Link>
           </div>
+        </div>
 
-          <div className="border-b border-slate-200 p-5 dark:border-slate-800">
-            <div className="relative">
+        {/* Search */}
+        <div className="mt-8 rounded-2xl border border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex gap-3">
+            <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
 
               <input
-                type="search"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    loadQuestions();
+                  }
+                }}
                 placeholder="Search questions..."
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2.5 pl-10 pr-4 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-slate-700 dark:bg-slate-950 dark:text-white dark:placeholder:text-slate-500"
+                className="w-full rounded-xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm outline-none focus:border-indigo-500 dark:border-slate-700 dark:bg-slate-950"
               />
             </div>
+
+            <button
+              onClick={loadQuestions}
+              className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-bold text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900"
+            >
+              Search
+            </button>
           </div>
+        </div>
 
+        {/* Table */}
+        <div className="mt-6 overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="overflow-x-auto">
-            {questions.length > 0 ? (
-              <table className="w-full min-w-[760px] text-left">
-                <thead className="bg-slate-50 dark:bg-slate-950">
-                  <tr className="border-b border-slate-200 dark:border-slate-800">
-                    <th className="px-5 py-4 text-xs font-bold uppercase text-slate-500">
-                      Question
-                    </th>
-                    <th className="px-5 py-4 text-xs font-bold uppercase text-slate-500">
-                      Difficulty
-                    </th>
-                    <th className="px-5 py-4 text-xs font-bold uppercase text-slate-500">
-                      Tags
-                    </th>
-                    <th className="px-5 py-4 text-right text-xs font-bold uppercase text-slate-500">
-                      Actions
-                    </th>
-                  </tr>
-                </thead>
+            <table className="w-full min-w-[900px] text-left">
+              <thead className="border-b border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950">
+                <tr>
+                  <th className="px-5 py-4 text-xs font-black uppercase tracking-wider text-slate-500">
+                    Question
+                  </th>
+                  <th className="px-5 py-4 text-xs font-black uppercase tracking-wider text-slate-500">
+                    Subject
+                  </th>
+                  <th className="px-5 py-4 text-xs font-black uppercase tracking-wider text-slate-500">
+                    Exam
+                  </th>
+                  <th className="px-5 py-4 text-xs font-black uppercase tracking-wider text-slate-500">
+                    Difficulty
+                  </th>
+                  <th className="px-5 py-4 text-xs font-black uppercase tracking-wider text-slate-500">
+                    Daily
+                  </th>
+                  <th className="px-5 py-4 text-right text-xs font-black uppercase tracking-wider text-slate-500">
+                    Actions
+                  </th>
+                </tr>
+              </thead>
 
-                <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {questions.map((question) => (
-                    <tr
-                      key={question.id}
-                      className="transition hover:bg-slate-50 dark:hover:bg-slate-950/60"
+              <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
+                {loading ? (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="px-5 py-12 text-center text-sm text-slate-500"
                     >
-                      <td className="max-w-xl px-5 py-4">
-                        <p className="line-clamp-2 text-sm font-semibold">
-                          {question.question}
+                      Loading questions...
+                    </td>
+                  </tr>
+                ) : questions.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={6}
+                      className="px-5 py-12 text-center"
+                    >
+                      <FileQuestion className="mx-auto h-10 w-10 text-slate-300" />
+
+                      <p className="mt-3 font-bold">
+                        No questions found
+                      </p>
+
+                      <p className="mt-1 text-sm text-slate-500">
+                        Add your first question to the question bank.
+                      </p>
+                    </td>
+                  </tr>
+                ) : (
+                  questions.map((item) => (
+                    <tr
+                      key={item._id}
+                      className="hover:bg-slate-50 dark:hover:bg-slate-950"
+                    >
+                      <td className="max-w-md px-5 py-4">
+                        <p className="line-clamp-2 text-sm font-bold">
+                          {item.question}
                         </p>
+
                         <p className="mt-1 text-xs text-slate-400">
-                          ID: {question.id}
+                          {item.topic}
                         </p>
                       </td>
 
+                      <td className="px-5 py-4 text-sm">
+                        {item.subject}
+                      </td>
+
+                      <td className="px-5 py-4 text-sm">
+                        {item.exam}
+                      </td>
+
                       <td className="px-5 py-4">
-                        <span className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400">
-                          {question.difficulty}
+                        <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-xs font-bold dark:bg-slate-800">
+                          {item.difficulty}
                         </span>
                       </td>
 
                       <td className="px-5 py-4">
-                        <div className="flex max-w-xs flex-wrap gap-1.5">
-                          {question.tags.slice(0, 3).map((tag) => (
-                            <span
-                              key={tag}
-                              className="rounded-lg bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-500 dark:bg-slate-800 dark:text-slate-400"
-                            >
-                              {tag}
-                            </span>
-                          ))}
-                        </div>
+                        {item.isDailyQuiz ? (
+                          <span className="rounded-lg bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400">
+                            Yes
+                          </span>
+                        ) : (
+                          <span className="text-xs text-slate-400">
+                            No
+                          </span>
+                        )}
                       </td>
 
                       <td className="px-5 py-4">
                         <div className="flex justify-end gap-2">
-                          <button
-                            type="button"
-                            className="rounded-lg border border-slate-200 p-2 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:hover:bg-slate-800"
-                            aria-label="Edit question"
+                          <Link
+                            href={`/admin/questions/${item._id}/edit`}
+                            className="rounded-lg p-2 text-slate-500 hover:bg-indigo-50 hover:text-indigo-600 dark:hover:bg-indigo-500/10"
                           >
-                            <Edit3 className="h-4 w-4" />
-                          </button>
+                            <Edit className="h-4 w-4" />
+                          </Link>
 
                           <button
-                            type="button"
-                            className="rounded-lg border border-red-200 p-2 text-red-500 hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30"
-                            aria-label="Delete question"
+                            onClick={() =>
+                              deleteQuestion(item._id)
+                            }
+                            className="rounded-lg p-2 text-slate-500 hover:bg-rose-50 hover:text-rose-600 dark:hover:bg-rose-500/10"
                           >
                             <Trash2 className="h-4 w-4" />
                           </button>
                         </div>
                       </td>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            ) : (
-              <div className="p-12 text-center">
-                <FileQuestion className="mx-auto h-10 w-10 text-slate-400" />
-                <h2 className="mt-4 font-bold">No questions found</h2>
-              </div>
-            )}
+                  ))
+                )}
+              </tbody>
+            </table>
           </div>
-        </section>
+        </div>
       </div>
     </main>
   );
 }
-

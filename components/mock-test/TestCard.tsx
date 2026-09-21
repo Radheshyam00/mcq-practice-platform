@@ -1,141 +1,197 @@
+"use client";
 
 import Link from "next/link";
+import {
+  ArrowRight,
+  CheckCircle2,
+  Clock3,
+  LockKeyhole,
+  Play,
+  Sparkles,
+  Trophy,
+} from "lucide-react";
 
 type TestCardProps = {
   id: string;
   title: string;
+  slug: string;
+  description: string;
+  examId?: string;
+  examName?: string;
+  examSlug?: string;
   questions: number;
-  durationMinutes: number;
-  difficulty: string;
+  duration: number;
+  difficulty: "Easy" | "Medium" | "Hard" | "Mixed";
+  demo?: boolean;
+  isActive?: boolean;
+  isLoggedIn?: boolean;
 };
 
-function getDifficultyStyle(difficulty: string) {
-  const value = difficulty.toLowerCase();
-
-  if (value === "easy") {
-    return "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-400 dark:ring-emerald-500/20";
-  }
-
-  if (value === "medium") {
-    return "bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-400 dark:ring-amber-500/20";
-  }
-
-  if (value === "hard") {
-    return "bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-500/10 dark:text-rose-400 dark:ring-rose-500/20";
-  }
-
-  return "bg-slate-100 text-slate-600 ring-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:ring-slate-700";
-}
-
 export function TestCard({
-  id,
   title,
+  slug,
+  description,
+  examName,
   questions,
-  durationMinutes,
+  duration,
   difficulty,
+  demo = false,
+  isLoggedIn = false,
 }: TestCardProps) {
+  /*
+   * Access rule:
+   *
+   * Logged in:
+   *   - Can start every active mock test.
+   *
+   * Logged out:
+   *   - Can start only demo mock test.
+   */
+  const locked = !isLoggedIn && !demo;
+
+  const difficultyClass =
+    difficulty === "Easy"
+      ? "bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:ring-emerald-900/50"
+      : difficulty === "Medium"
+        ? "bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:ring-amber-900/50"
+        : difficulty === "Hard"
+          ? "bg-rose-50 text-rose-700 ring-rose-200 dark:bg-rose-950/40 dark:text-rose-400 dark:ring-rose-900/50"
+          : "bg-violet-50 text-violet-700 ring-violet-200 dark:bg-violet-950/40 dark:text-violet-400 dark:ring-violet-900/50";
+
   return (
-    <Link
-      href={`/mock-tests/${id}`}
-      className="group block rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all duration-200 hover:-translate-y-1 hover:border-indigo-300 hover:shadow-lg hover:shadow-indigo-500/5 dark:border-slate-800 dark:bg-slate-900 dark:hover:border-indigo-500/40"
+    <article
+      className={[
+        "group relative flex h-full flex-col overflow-hidden rounded-2xl",
+        "border bg-white shadow-sm transition-all duration-300",
+        "dark:bg-slate-900",
+        locked
+          ? "border-slate-200 dark:border-slate-800"
+          : "border-slate-200 hover:-translate-y-1 hover:border-indigo-300 hover:shadow-xl hover:shadow-indigo-500/10 dark:border-slate-800 dark:hover:border-indigo-800",
+      ].join(" ")}
     >
-      {/* Header */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h3 className="line-clamp-2 text-base font-bold leading-6 text-slate-900 transition-colors group-hover:text-indigo-600 dark:text-white dark:group-hover:text-indigo-400">
-            {title}
-          </h3>
+      {/* Top gradient */}
+      <div
+        className={[
+          "h-1.5 w-full",
+          locked
+            ? "bg-slate-300 dark:bg-slate-700"
+            : "bg-gradient-to-r from-indigo-500 via-violet-500 to-indigo-500",
+        ].join(" ")}
+      />
 
-          <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
-            Mock test
-          </p>
+      <div className="flex flex-1 flex-col p-6">
+        {/* Badges */}
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
+            {demo && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-700 ring-1 ring-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:ring-indigo-900/60">
+                <Sparkles className="h-3.5 w-3.5" />
+                Demo
+              </span>
+            )}
+
+            {isLoggedIn && !demo && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700 ring-1 ring-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:ring-emerald-900/50">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Unlocked
+              </span>
+            )}
+
+            {locked && (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-bold text-slate-600 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:ring-slate-700">
+                <LockKeyhole className="h-3.5 w-3.5" />
+                Login Required
+              </span>
+            )}
+          </div>
+
+          <span
+            className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-bold ring-1 ${difficultyClass}`}
+          >
+            {difficulty}
+          </span>
         </div>
 
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 transition-transform duration-200 group-hover:scale-105 dark:bg-indigo-500/10 dark:text-indigo-400">
-          <svg
-            className="h-4.5 w-4.5"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
-            <path d="M14 2v6h6" />
-            <path d="M8 13h8" />
-            <path d="M8 17h5" />
-          </svg>
-        </div>
-      </div>
-
-      {/* Metadata */}
-      <div className="mt-5 flex flex-wrap items-center gap-2">
-        <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-600 ring-1 ring-slate-200 dark:bg-slate-950 dark:text-slate-300 dark:ring-slate-800">
-          <svg
-            className="h-3.5 w-3.5 text-slate-400"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
-            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z" />
-          </svg>
-          {questions} questions
-        </span>
-
-        <span className="inline-flex items-center gap-1.5 rounded-lg bg-slate-50 px-2.5 py-1.5 text-xs font-medium text-slate-600 ring-1 ring-slate-200 dark:bg-slate-950 dark:text-slate-300 dark:ring-slate-800">
-          <svg
-            className="h-3.5 w-3.5 text-slate-400"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <circle cx="12" cy="12" r="9" />
-            <path d="M12 7v5l3 2" />
-          </svg>
-          {durationMinutes} min
-        </span>
-
-        <span
-          className={`inline-flex rounded-lg px-2.5 py-1.5 text-xs font-bold ring-1 ${getDifficultyStyle(
-            difficulty,
-          )}`}
+        {/* Icon */}
+        <div
+          className={[
+            "mt-6 flex h-14 w-14 items-center justify-center rounded-2xl",
+            locked
+              ? "bg-slate-100 text-slate-400 dark:bg-slate-800 dark:text-slate-500"
+              : "bg-indigo-50 text-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-400",
+          ].join(" ")}
         >
-          {difficulty}
-        </span>
-      </div>
+          {locked ? (
+            <LockKeyhole className="h-7 w-7" />
+          ) : (
+            <Trophy className="h-7 w-7" />
+          )}
+        </div>
 
-      {/* Footer */}
-      <div className="mt-5 flex items-center justify-between border-t border-slate-100 pt-4 dark:border-slate-800">
-        <span className="text-xs font-medium text-slate-400 transition-colors group-hover:text-indigo-500 dark:text-slate-500 dark:group-hover:text-indigo-400">
-          Start test
-        </span>
+        {/* Content */}
+        <h3 className="mt-5 text-xl font-black tracking-tight text-slate-900 dark:text-white">
+          {title}
+        </h3>
 
-        <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-slate-50 text-slate-400 transition-all duration-200 group-hover:bg-indigo-50 group-hover:text-indigo-600 group-hover:translate-x-0.5 dark:bg-slate-950 dark:text-slate-500 dark:group-hover:bg-indigo-500/10 dark:group-hover:text-indigo-400">
-          <svg
-            className="h-4 w-4"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="m9 18 6-6-6-6" />
-          </svg>
-        </span>
+        {/* Exam name */}
+        {examName && (
+          <div className="mt-2 text-xs font-bold uppercase tracking-wide text-indigo-600 dark:text-indigo-400">
+            {examName}
+          </div>
+        )}
+
+        <p className="mt-2 line-clamp-3 text-sm leading-6 text-slate-500 dark:text-slate-400">
+          {description || "Test your knowledge with this mock examination."}
+        </p>
+
+        {/* Stats */}
+        <div className="mt-6 grid grid-cols-2 gap-3">
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
+            <div className="text-xs font-semibold text-slate-400">
+              Questions
+            </div>
+
+            <div className="mt-1 text-base font-black text-slate-900 dark:text-white">
+              {questions}
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-800 dark:bg-slate-950">
+            <div className="flex items-center gap-1 text-xs font-semibold text-slate-400">
+              <Clock3 className="h-3.5 w-3.5" />
+              Duration
+            </div>
+
+            <div className="mt-1 text-base font-black text-slate-900 dark:text-white">
+              {duration} min
+            </div>
+          </div>
+        </div>
+
+        {/* Button */}
+        <div className="mt-auto pt-6">
+          {locked ? (
+            <Link
+              href={`/login?callbackUrl=${encodeURIComponent(
+                `/mock-tests/${slug}`,
+              )}`}
+              className="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-300 bg-slate-100 px-4 py-3 text-sm font-bold text-slate-700 transition hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-indigo-800 dark:hover:bg-indigo-950/40 dark:hover:text-indigo-300"
+            >
+              <LockKeyhole className="h-4 w-4" />
+              Login to Start
+            </Link>
+          ) : (
+            <Link
+              href={`/mock-tests/${slug}`}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-3 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700 hover:shadow-md"
+            >
+              <Play className="h-4 w-4 fill-current" />
+              Start Mock Test
+              <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+            </Link>
+          )}
+        </div>
       </div>
-    </Link>
+    </article>
   );
 }

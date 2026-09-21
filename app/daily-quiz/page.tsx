@@ -1,8 +1,83 @@
-import { questions } from "@/data/questions";
-import { QuizContainer } from "@/components/quiz/QuizContainer";
+import { getServerSession } from "next-auth";
+import { redirect } from "next/navigation";
 
-export default function DailyQuizPage() {
-  const dailyQuestions = questions.slice(0, 5);
+import { connectDB} from "@/lib/mongodb";
+import { Exam } from "@/models/Exam";
+import { Question } from "@/models/Question";
+import { QuizContainer } from "@/components/quiz/QuizContainer";
+import { authOptions } from "@/lib/auth";
+
+export const dynamic = "force-dynamic";
+
+export default async function DailyQuizPage() {
+  const session = await getServerSession(authOptions);
+
+  const isLoggedIn = !!session?.user;
+
+  await connectDB();
+
+  /*
+   * Find an active exam that has Daily Quiz questions.
+   *
+   * We use one exam so QuizContainer can save the result
+   * with a valid examId.
+   */
+  const dailyExam = await Question.findOne({
+    isDailyQuiz: true,
+    isActive: true,
+  })
+    .select("examId")
+    .sort({ createdAt: -1 })
+    .lean();
+
+  let examDoc = null;
+
+  if (dailyExam?.examId) {
+    examDoc = await Exam.findOne({
+      _id: dailyExam.examId,
+      isActive: true,
+    }).lean();
+  }
+
+  /*
+   * Get Daily Quiz questions for this exam.
+   */
+  let questionDocs: any[] = [];
+
+  if (examDoc) {
+    questionDocs = await Question.find({
+      examId: examDoc._id,
+      isDailyQuiz: true,
+      isActive: true,
+    })
+      .sort({ createdAt: -1 })
+      .lean();
+  }
+
+  /*
+   * Guests get only 5 demo questions.
+   * Logged-in users get the complete Daily Quiz.
+   */
+  const selectedQuestions = isLoggedIn
+    ? questionDocs
+    : questionDocs.slice(0, 5);
+
+  const isDemo = !isLoggedIn;
+
+  /*
+   * Convert MongoDB questions into QuizContainer format.
+   */
+  const dailyQuestions = selectedQuestions.map((question) => ({
+    id: question._id.toString(),
+    question: question.question,
+    options: question.options,
+    correctAnswer: question.correctAnswer,
+    explanation: question.explanation ?? "",
+    exam: question.exam ?? examDoc?.name ?? "",
+    subject: question.subject ?? "",
+    topic: question.topic,
+    difficulty: question.difficulty,
+  }));
 
   return (
     <div className="min-h-screen overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
@@ -32,6 +107,7 @@ export default function DailyQuizPage() {
                 aria-hidden="true"
                 className="h-1.5 w-1.5 animate-pulse rounded-full bg-indigo-500"
               />
+
               Daily Challenge
             </div>
 
@@ -42,9 +118,39 @@ export default function DailyQuizPage() {
 
             {/* Description */}
             <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg dark:text-slate-400">
-              A quick mixed quiz to keep your preparation consistent. Test your
-              knowledge every day and build a stronger learning habit.
+              A quick mixed quiz to keep your preparation consistent. Test
+              your knowledge every day and build a stronger learning habit.
             </p>
+
+            {/* Demo/Login notice */}
+            {isDemo ? (
+              <div className="mt-6 rounded-2xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-900/50 dark:bg-amber-950/30">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="font-bold text-amber-900 dark:text-amber-200">
+                      Demo Daily Quiz
+                    </p>
+
+                    <p className="mt-1 text-sm text-amber-700 dark:text-amber-300">
+                      You can try the first 5 questions without signing in.
+                      Login to access the complete daily quiz.
+                    </p>
+                  </div>
+
+                  <a
+                    href="/login?callbackUrl=/daily-quiz"
+                    className="inline-flex shrink-0 items-center justify-center rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white shadow-sm transition hover:bg-indigo-700"
+                  >
+                    Login
+                  </a>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-6 inline-flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-sm font-semibold text-emerald-700 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-300">
+                <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                Full Daily Quiz unlocked
+              </div>
+            )}
 
             {/* Quiz Stats */}
             <div className="mt-7 flex flex-wrap gap-3">
@@ -109,11 +215,14 @@ export default function DailyQuizPage() {
         </div>
 
         {/* Quiz */}
-        {dailyQuestions.length > 0 ? (
+        {dailyQuestions.length > 0 && examDoc ? (
           <div className="rounded-3xl border border-slate-200 bg-white p-3 shadow-sm sm:p-5 lg:p-6 dark:border-slate-800 dark:bg-slate-900">
             <QuizContainer
-              questions={dailyQuestions}
+              questions={dailyQuestions as any}
               durationMinutes={10}
+              examId={examDoc._id.toString()}
+              examName={examDoc.name}
+              resultType="daily-quiz"
             />
           </div>
         ) : (

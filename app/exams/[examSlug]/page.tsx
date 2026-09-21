@@ -1,4 +1,3 @@
-
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
@@ -8,7 +7,10 @@ import {
   Sparkles,
 } from "lucide-react";
 
-import { getExam } from "@/data/exams";
+import { connectDB } from "@/lib/mongodb";
+import { Exam } from "@/models/Exam";
+import { Question } from "@/models/Question";
+
 import { ExamHeader } from "@/components/exam/ExamHeader";
 import { ExamInfo } from "@/components/exam/ExamInfo";
 import { ExamTabs } from "@/components/exam/ExamTabs";
@@ -20,13 +22,63 @@ type ExamPageProps = {
   }>;
 };
 
+type ExamSubject = {
+  _id: { toString: () => string } | string;
+  name: string;
+  slug: string;
+  description?: string;
+};
+
 export default async function ExamPage({ params }: ExamPageProps) {
   const { examSlug } = await params;
-  const exam = getExam(examSlug);
 
-  if (!exam) {
+  await connectDB();
+
+  const examDoc = await Exam.findOne({
+    slug: examSlug.toLowerCase(),
+    isActive: true,
+  }).lean();
+
+  if (!examDoc) {
     notFound();
   }
+
+  // Count active questions for this exam
+  const totalQuestions = await Question.countDocuments({
+    examId: examDoc._id,
+    isActive: true,
+  });
+
+  // Convert MongoDB document to plain object
+  const exam = {
+    id: examDoc._id.toString(),
+    _id: examDoc._id.toString(),
+    name: examDoc.name,
+    shortName: examDoc.shortName ?? examDoc.name.slice(0, 3).toUpperCase(),
+    slug: examDoc.slug,
+    description: examDoc.description ?? "",
+    icon: examDoc.icon ?? "BookOpen",
+    color: examDoc.color ?? "indigo",
+
+    subjects: (examDoc.subjects ?? []).map((subject: {
+      _id: { toString: () => string } | string;
+      name: string;
+      slug: string;
+      description?: string;
+    }) => ({
+      _id: subject._id.toString(),
+      name: subject.name,
+      slug: subject.slug,
+      description: subject.description ?? "",
+    })),
+
+    durationMinutes: examDoc.durationMinutes,
+    isActive: examDoc.isActive,
+
+    // Values required by existing ExamInfo
+    totalQuestions,
+    category: "Competitive Exam",
+  };
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 transition-colors dark:bg-slate-950 dark:text-white">
@@ -36,13 +88,11 @@ export default async function ExamPage({ params }: ExamPageProps) {
         <ExamTabs slug={exam.slug} />
 
         <div className="py-8 sm:py-10 lg:py-12">
-          {/* Exam information */}
           <ExamInfo exam={exam} />
 
           {/* Action section */}
           <section className="mt-8">
             <div className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-6">
-              {/* Decorative background */}
               <div
                 aria-hidden="true"
                 className="pointer-events-none absolute -right-16 -top-16 h-40 w-40 rounded-full bg-indigo-500/10 blur-3xl"
@@ -165,8 +215,11 @@ export default async function ExamPage({ params }: ExamPageProps) {
 
             {exam.subjects.length > 0 ? (
               <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {exam.subjects.map((slug) => (
-                  <SubjectCard key={slug} slug={slug} />
+                {exam.subjects.map((subject: ExamSubject) => (
+                  <SubjectCard
+                    key={subject._id.toString()}
+                    slug={subject.slug}
+                  />
                 ))}
               </div>
             ) : (
@@ -191,4 +244,3 @@ export default async function ExamPage({ params }: ExamPageProps) {
     </main>
   );
 }
-

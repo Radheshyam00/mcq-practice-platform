@@ -1,15 +1,16 @@
-
 import Link from "next/link";
+import { notFound } from "next/navigation";
 import {
   ArrowLeft,
   BookOpen,
   ClipboardCheck,
   HelpCircle,
 } from "lucide-react";
-import { notFound } from "next/navigation";
 
-import { getExam } from "@/data/exams";
-import { getQuestionsByExam } from "@/data/questions";
+import { connectDB } from "@/lib/mongodb";
+import { Exam } from "@/models/Exam";
+import { Question } from "@/models/Question";
+
 import { QuizContainer } from "@/components/quiz/QuizContainer";
 
 type PracticePageProps = {
@@ -23,13 +24,107 @@ export default async function PracticePage({
 }: PracticePageProps) {
   const { examSlug } = await params;
 
-  const exam = getExam(examSlug);
+  await connectDB();
 
-  if (!exam) {
+  /*
+   * Find active exam from MongoDB
+   */
+  const examDoc = await Exam.findOne({
+    slug: examSlug.toLowerCase(),
+    isActive: true,
+  }).lean();
+
+  if (!examDoc) {
     notFound();
   }
 
-  const questions = getQuestionsByExam(examSlug);
+  /*
+   * Get active questions for this exam
+   */
+  const questionDocs = await Question.find({
+    examId: examDoc._id,
+    isActive: true,
+  })
+    .sort({ createdAt: 1 })
+    .lean();
+
+  /*
+   * Convert MongoDB questions into the format
+   * expected by QuizContainer.
+   *
+   * Current MongoDB structure:
+   *
+   * options: string[]
+   * correctAnswer: number
+   */
+  const questions = questionDocs.map((question) => ({
+    id: question._id.toString(),
+
+    question: question.question,
+
+    options: question.options,
+
+    correctAnswer: question.correctAnswer,
+
+    correctOptionId:
+      typeof question.correctAnswer === "number" &&
+      Array.isArray(question.options)
+        ? question.options[question.correctAnswer] || ""
+        : "",
+
+    explanation: question.explanation || "",
+
+    exam: question.exam || examDoc.name,
+
+    examSlug: examDoc.slug,
+
+    subject: question.subject || "",
+
+    subjectSlug: question.subjectSlug || question.subject || "",
+
+    topic: question.topic,
+
+    difficulty: question.difficulty,
+
+    tags: Array.isArray(question.tags) ? question.tags : [],
+  }));
+
+  /*
+   * Convert MongoDB exam into a plain object.
+   */
+  const exam = {
+    _id: examDoc._id.toString(),
+
+    name: examDoc.name,
+
+    slug: examDoc.slug,
+
+    description: examDoc.description || "",
+
+    durationMinutes:
+      examDoc.durationMinutes || 60,
+
+    isActive:
+      examDoc.isActive !== false,
+
+    subjects: (examDoc.subjects || []).map(
+      (subject: {
+        _id: { toString: () => string } | string;
+        name: string;
+        slug: string;
+        description?: string;
+      }) => ({
+        _id: subject._id.toString(),
+
+        name: subject.name,
+
+        slug: subject.slug,
+
+        description:
+          subject.description || "",
+      })
+    ),
+  };
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 transition-colors dark:bg-slate-950 dark:text-white">
@@ -53,6 +148,7 @@ export default async function PracticePage({
             className="h-4 w-4 transition-transform group-hover:-translate-x-0.5"
             aria-hidden="true"
           />
+
           Back to {exam.name}
         </Link>
 
@@ -124,8 +220,11 @@ export default async function PracticePage({
                   <p className="text-lg font-black text-slate-900 dark:text-white">
                     {questions.length}
                   </p>
+
                   <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-                    {questions.length === 1 ? "Question" : "Questions"}
+                    {questions.length === 1
+                      ? "Question"
+                      : "Questions"}
                   </p>
                 </div>
               </div>
@@ -137,7 +236,26 @@ export default async function PracticePage({
         {questions.length > 0 ? (
           <QuizContainer
             questions={questions}
-            durationMinutes={30}
+            durationMinutes={
+              examDoc.durationMinutes || 30
+            }
+
+            /*
+             * IMPORTANT:
+             * Pass the MongoDB Exam ID.
+             * This is required by /api/results.
+             */
+            examId={examDoc._id.toString()}
+
+            /*
+             * Used when saving the result.
+             */
+            examName={examDoc.name}
+
+            /*
+             * Identify this result as practice.
+             */
+            resultType="practice"
           />
         ) : (
           <section className="rounded-3xl border border-dashed border-slate-300 bg-white px-6 py-14 text-center shadow-sm dark:border-slate-700 dark:bg-slate-900">
@@ -170,7 +288,11 @@ export default async function PracticePage({
                 dark:focus-visible:ring-offset-slate-950
               "
             >
-              <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+              <ArrowLeft
+                className="h-4 w-4"
+                aria-hidden="true"
+              />
+
               Back to Exam
             </Link>
           </section>
@@ -179,4 +301,3 @@ export default async function PracticePage({
     </main>
   );
 }
-

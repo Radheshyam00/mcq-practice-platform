@@ -1,4 +1,3 @@
-
 import { notFound } from "next/navigation";
 import {
   ArrowLeft,
@@ -8,7 +7,10 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 
-import { getExam } from "@/data/exams";
+import { connectDB } from "@/lib/mongodb";
+import { Exam } from "@/models/Exam";
+import { Question } from "@/models/Question";
+
 import { ExamHeader } from "@/components/exam/ExamHeader";
 import { ExamTabs } from "@/components/exam/ExamTabs";
 import { TestInstructions } from "@/components/mock-test/TestInstructions";
@@ -23,11 +25,65 @@ export default async function InstructionsPage({
   params,
 }: InstructionsPageProps) {
   const { examSlug } = await params;
-  const exam = getExam(examSlug);
 
-  if (!exam) {
+  /*
+   * Connect to MongoDB
+   */
+  await connectDB();
+
+  /*
+   * Find exam from MongoDB using slug
+   */
+  const examDoc = await Exam.findOne({
+    slug: examSlug.toLowerCase(),
+    isActive: true,
+  }).lean();
+
+  /*
+   * If exam doesn't exist
+   */
+  if (!examDoc) {
     notFound();
   }
+
+  /*
+   * Count active questions for this exam.
+   *
+   * This is derived data because totalQuestions
+   * is not stored directly inside the Exam document.
+   */
+  const totalQuestions =
+    await Question.countDocuments({
+      examId: examDoc._id,
+      isActive: true,
+    });
+
+  /*
+   * Convert MongoDB data into the shape expected
+   * by your existing ExamHeader component.
+   */
+  const exam = {
+    id: examDoc._id.toString(),
+    _id: examDoc._id.toString(),
+    name: examDoc.name,
+    shortName: examDoc.shortName ?? examDoc.name.slice(0, 3).toUpperCase(),
+    slug: examDoc.slug,
+    description: examDoc.description ?? "",
+    category: "Competitive Exam",
+    icon: examDoc.icon ?? "BookOpen",
+    color: examDoc.color ?? "indigo",
+    totalQuestions,
+    durationMinutes: examDoc.durationMinutes || 60,
+    isActive: examDoc.isActive !== false,
+    subjects: (examDoc.subjects || []).map(
+      (subject: any) => ({
+        _id: subject._id.toString(),
+        name: subject.name,
+        slug: subject.slug,
+        description: subject.description || "",
+      })
+    ),
+  };
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 transition-colors dark:bg-slate-950 dark:text-white">
@@ -37,8 +93,10 @@ export default async function InstructionsPage({
         <ExamTabs slug={exam.slug} />
 
         <div className="py-8 sm:py-10 lg:py-12">
+
           {/* Page heading */}
           <section className="relative overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+
             <div
               aria-hidden="true"
               className="pointer-events-none absolute -right-20 -top-24 h-64 w-64 rounded-full bg-indigo-500/10 blur-3xl"
@@ -50,13 +108,17 @@ export default async function InstructionsPage({
             />
 
             <div className="relative px-5 py-7 sm:px-8 sm:py-9 lg:px-10">
+
               <div className="flex flex-col gap-6 lg:flex-row lg:items-center lg:justify-between">
+
                 <div className="max-w-2xl">
+
                   <div className="inline-flex items-center gap-2 rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-bold text-indigo-700 dark:border-indigo-900/60 dark:bg-indigo-950/40 dark:text-indigo-300">
                     <ClipboardCheck
                       className="h-3.5 w-3.5"
                       aria-hidden="true"
                     />
+
                     Mock Test
                   </div>
 
@@ -71,23 +133,38 @@ export default async function InstructionsPage({
                     </span>{" "}
                     mock test.
                   </p>
+
+                  {/* Optional question information */}
+                  <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
+                    {totalQuestions} active questions available
+                  </p>
                 </div>
 
                 {/* Quick info */}
                 <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:w-auto">
+
                   <InfoItem
-                    icon={<Clock3 className="h-4 w-4" />}
-                    label="Timed"
+                    icon={
+                      <Clock3 className="h-4 w-4" />
+                    }
+                    label={`${exam.durationMinutes} Min`}
                   />
+
                   <InfoItem
-                    icon={<ClipboardCheck className="h-4 w-4" />}
+                    icon={
+                      <ClipboardCheck className="h-4 w-4" />
+                    }
                     label="Exam Mode"
                   />
+
                   <InfoItem
-                    icon={<ShieldCheck className="h-4 w-4" />}
+                    icon={
+                      <ShieldCheck className="h-4 w-4" />
+                    }
                     label="Fair Test"
                     className="col-span-2 sm:col-span-1"
                   />
+
                 </div>
               </div>
             </div>
@@ -100,11 +177,14 @@ export default async function InstructionsPage({
 
           {/* Bottom navigation */}
           <section className="mt-6 rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900 sm:p-5">
+
             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+
               <div>
                 <p className="text-sm font-bold text-slate-900 dark:text-white">
                   Ready to begin?
                 </p>
+
                 <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                   Make sure you understand the rules before starting.
                 </p>
@@ -127,9 +207,14 @@ export default async function InstructionsPage({
                   dark:focus-visible:ring-offset-slate-950
                 "
               >
-                <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+                <ArrowLeft
+                  className="h-4 w-4"
+                  aria-hidden="true"
+                />
+
                 Back to Exam
               </Link>
+
             </div>
           </section>
         </div>
@@ -161,8 +246,8 @@ function InfoItem({
       <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white text-indigo-600 shadow-sm dark:bg-slate-900 dark:text-indigo-400">
         {icon}
       </span>
+
       {label}
     </div>
   );
 }
-

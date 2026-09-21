@@ -1,7 +1,87 @@
 import Link from "next/link";
-import { subjects } from "@/data/subjects";
+import { getServerSession } from "next-auth";
 
-export default function SubjectsPage() {
+import { authOptions } from "@/lib/auth";
+import { connectDB } from "@/lib/mongodb";
+import { Exam } from "@/models/Exam";
+
+type SubjectData = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string;
+  examCount: number;
+};
+
+export const dynamic = "force-dynamic";
+
+export default async function SubjectsPage() {
+  const session = await getServerSession(authOptions);
+  const isLoggedIn = Boolean(session?.user);
+
+  await connectDB();
+
+  /*
+   * Load all active exams and their embedded subjects.
+   */
+  const exams = await Exam.find({
+    isActive: true,
+  })
+    .select("subjects demo")
+    .lean();
+
+  /*
+   * Guest users can only access subjects
+   * belonging to demo exams.
+   *
+   * Logged-in users can access subjects
+   * from all active exams.
+   */
+  const availableExams = isLoggedIn
+    ? exams
+    : exams.filter((exam) => exam.demo === true);
+
+  /*
+   * Combine subjects from available exams.
+   *
+   * A subject can exist in multiple exams,
+   * so merge subjects using their slug.
+   */
+  const subjectMap = new Map<string, SubjectData>();
+
+  for (const exam of availableExams) {
+    for (const subject of exam.subjects ?? []) {
+      const slug = subject.slug?.toLowerCase().trim();
+
+      if (!slug) continue;
+
+      const existing = subjectMap.get(slug);
+
+      if (existing) {
+        existing.examCount += 1;
+
+        if (
+          !existing.description &&
+          subject.description
+        ) {
+          existing.description = subject.description;
+        }
+      } else {
+        subjectMap.set(slug, {
+          id: subject._id.toString(),
+          name: subject.name,
+          slug,
+          description: subject.description ?? "",
+          examCount: 1,
+        });
+      }
+    }
+  }
+
+  const subjects = Array.from(subjectMap.values()).sort(
+    (a, b) => a.name.localeCompare(b.name),
+  );
+
   return (
     <div className="min-h-screen overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       {/* Header */}
@@ -25,6 +105,7 @@ export default function SubjectsPage() {
                 aria-hidden="true"
                 className="h-1.5 w-1.5 rounded-full bg-indigo-500"
               />
+
               Subject Practice
             </div>
 
@@ -108,7 +189,7 @@ export default function SubjectsPage() {
                   aria-hidden="true"
                   className="
                     absolute inset-x-0 top-0 h-1
-                    bg-linear-to-r from-indigo-500 via-violet-500 to-purple-500
+                    bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500
                     opacity-0 transition-opacity duration-300
                     group-hover:opacity-100
                   "
@@ -129,7 +210,9 @@ export default function SubjectsPage() {
                     dark:bg-indigo-950/50
                   "
                 >
-                  <span aria-hidden="true">{subject.icon}</span>
+                  <span aria-hidden="true">
+                    📚
+                  </span>
                 </div>
 
                 {/* Content */}
@@ -155,8 +238,17 @@ export default function SubjectsPage() {
                       dark:text-slate-400
                     "
                   >
-                    {subject.description}
+                    {subject.description ||
+                      "Practice multiple-choice questions from this subject."}
                   </p>
+                </div>
+
+                {/* Exam count */}
+                <div className="mt-4">
+                  <span className="inline-flex rounded-full bg-indigo-50 px-2.5 py-1 text-xs font-bold text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400">
+                    {subject.examCount}{" "}
+                    {subject.examCount === 1 ? "exam" : "exams"}
+                  </span>
                 </div>
 
                 {/* Footer */}

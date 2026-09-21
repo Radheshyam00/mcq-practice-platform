@@ -1,4 +1,3 @@
-
 "use client";
 
 import { BookOpen, Tag } from "lucide-react";
@@ -13,6 +12,48 @@ type QuestionCardProps = {
   showAnswer?: boolean;
   onSelect: (id: string) => void;
 };
+
+function getCorrectAnswerIndex(question: Question): number {
+  const rawQuestion = question as {
+    correctAnswer?: number;
+    answerIndex?: number;
+    correctOptionIndex?: number;
+  };
+
+  if (typeof rawQuestion.correctAnswer === "number") {
+    return rawQuestion.correctAnswer;
+  }
+
+  if (typeof rawQuestion.answerIndex === "number") {
+    return rawQuestion.answerIndex;
+  }
+
+  if (typeof rawQuestion.correctOptionIndex === "number") {
+    return rawQuestion.correctOptionIndex;
+  }
+
+  return 0;
+}
+
+function getOptionText(option: unknown): string {
+  if (typeof option === "string") {
+    return option;
+  }
+
+  if (option && typeof option === "object") {
+    const rawOption = option as {
+      text?: string;
+      option?: string;
+      value?: string;
+    };
+
+    if (typeof rawOption.text === "string") return rawOption.text;
+    if (typeof rawOption.option === "string") return rawOption.option;
+    if (typeof rawOption.value === "string") return rawOption.value;
+  }
+
+  return "";
+}
 
 export function QuestionCard({
   question,
@@ -68,7 +109,7 @@ export function QuestionCard({
           </div>
 
           {/* Tags */}
-          {question.tags.length > 0 && (
+          {question.tags?.length > 0 && (
             <div className="flex flex-wrap items-center gap-2">
               <Tag
                 className="h-3.5 w-3.5 shrink-0 text-slate-400"
@@ -140,24 +181,36 @@ export function QuestionCard({
 
         {/* Options */}
         <div className="mt-7 space-y-3">
-          {question.options.map((option, index) => (
-            <OptionButton
-              key={option.id}
-              id={option.id}
-              text={option.text}
-              selected={selected === option.id}
-              correct={
-                showAnswer && option.id === question.correctOptionId
-              }
-              wrong={
-                showAnswer &&
-                selected === option.id &&
-                option.id !== question.correctOptionId
-              }
-              disabled={showAnswer}
-              onClick={() => onSelect(option.id)}
-            />
-          ))}
+          {question.options.map((option, index) => {
+            // MongoDB stores options as string[]. Some sources also normalize
+            // them into objects with text/value fields.
+            const optionId = String(index);
+
+            // The Question model may expose the correct answer under different
+            // property names depending on the source data.
+            const correctAnswerIndex = getCorrectAnswerIndex(question);
+
+            const isSelected = selected === optionId;
+            const isCorrect = index === correctAnswerIndex;
+            const optionText = getOptionText(option);
+
+            return (
+              <OptionButton
+                key={`${question.id}-${optionId}`}
+                id={optionId}
+                text={optionText}
+                selected={isSelected}
+                correct={showAnswer && isCorrect}
+                wrong={
+                  showAnswer &&
+                  isSelected &&
+                  !isCorrect
+                }
+                disabled={showAnswer}
+                onClick={() => onSelect(optionId)}
+              />
+            );
+          })}
         </div>
 
         {/* Answer status */}
@@ -177,7 +230,7 @@ export function QuestionCard({
             </p>
 
             <p className="mt-1 text-sm font-bold text-slate-900 dark:text-white">
-              Option {question.correctOptionId}
+              Option {getCorrectAnswerIndex(question) + 1}
             </p>
           </div>
         )}
@@ -185,4 +238,3 @@ export function QuestionCard({
     </article>
   );
 }
-

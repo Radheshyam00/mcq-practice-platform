@@ -1,10 +1,12 @@
-const rows = [
-  ["Aarav Sharma", 98, 1240],
-  ["Priya Singh", 96, 1190],
-  ["Radheshyam", 92, 1050],
-  ["Neha Verma", 90, 980],
-  ["Vikram Patel", 88, 910],
-] as const;
+import { connectDB } from "@/lib/mongodb";
+import { Result } from "@/models/Result";
+
+type LeaderboardRow = {
+  name: string;
+  accuracy: number;
+  points: number;
+  attempts: number;
+};
 
 function getRankStyle(rank: number) {
   if (rank === 1) {
@@ -38,7 +40,119 @@ function getRankStyle(rank: number) {
   };
 }
 
-export default function LeaderboardPage() {
+export default async function LeaderboardPage() {
+  await connectDB();
+
+  /*
+   * Current weekly period
+   *
+   * Monday 00:00 → now
+   */
+  const now = new Date();
+
+  const startOfWeek = new Date(now);
+  const day = startOfWeek.getDay();
+
+  const daysFromMonday = day === 0 ? 6 : day - 1;
+
+  startOfWeek.setDate(startOfWeek.getDate() - daysFromMonday);
+  startOfWeek.setHours(0, 0, 0, 0);
+
+  /*
+   * Aggregate weekly results.
+   *
+   * Accuracy:
+   *   total correct / total questions
+   *
+   * Points:
+   *   total correct answers × 10
+   */
+  const leaderboard = await Result.aggregate([
+    {
+      $match: {
+        createdAt: {
+          $gte: startOfWeek,
+          $lte: now,
+        },
+      },
+    },
+
+    {
+      $group: {
+        _id: "$userId",
+
+        name: {
+          $last: "$studentName",
+        },
+
+        totalCorrect: {
+          $sum: "$correct",
+        },
+
+        totalQuestions: {
+          $sum: "$totalQuestions",
+        },
+
+        attempts: {
+          $sum: 1,
+        },
+      },
+    },
+
+    {
+      $project: {
+        _id: 0,
+        name: 1,
+        totalCorrect: 1,
+        totalQuestions: 1,
+        attempts: 1,
+
+        accuracy: {
+          $cond: [
+            {
+              $gt: ["$totalQuestions", 0],
+            },
+            {
+              $multiply: [
+                {
+                  $divide: [
+                    "$totalCorrect",
+                    "$totalQuestions",
+                  ],
+                },
+                100,
+              ],
+            },
+            0,
+          ],
+        },
+
+        points: {
+          $multiply: ["$totalCorrect", 10],
+        },
+      },
+    },
+
+    {
+      $sort: {
+        accuracy: -1,
+        points: -1,
+        attempts: -1,
+      },
+    },
+
+    {
+      $limit: 50,
+    },
+  ]);
+
+  const rows: LeaderboardRow[] = leaderboard.map((item) => ({
+    name: item.name || "Unknown User",
+    accuracy: Math.round(item.accuracy || 0),
+    points: item.points || 0,
+    attempts: item.attempts || 0,
+  }));
+
   return (
     <div className="min-h-screen overflow-hidden bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
       {/* Header */}
@@ -69,8 +183,8 @@ export default function LeaderboardPage() {
             </h1>
 
             <p className="mt-4 max-w-2xl text-base leading-7 text-slate-600 sm:text-lg dark:text-slate-400">
-              See how you compare with other learners and compete for the top
-              spot by improving your accuracy and points.
+              See how learners are performing this week based on accuracy and
+              points earned from completed tests.
             </p>
 
             {/* Stats */}
@@ -87,7 +201,7 @@ export default function LeaderboardPage() {
 
               <div className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 dark:border-slate-800 dark:bg-slate-900">
                 <span className="text-sm font-semibold text-slate-600 dark:text-slate-300">
-                  Weekly Ranking
+                  This Week
                 </span>
               </div>
             </div>
@@ -114,196 +228,161 @@ export default function LeaderboardPage() {
           </div>
         </div>
 
-        {/* Table Card */}
-        <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          {/* Desktop table */}
-          <div className="hidden overflow-x-auto md:block">
-            <table className="w-full min-w-162.5 text-left">
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950/70">
-                  <th className="px-6 py-4 text-xs font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    Rank
-                  </th>
+        {/* Empty state */}
+        {rows.length === 0 ? (
+          <div className="rounded-3xl border border-slate-200 bg-white px-6 py-16 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="text-4xl">🏆</div>
 
-                  <th className="px-6 py-4 text-xs font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    Learner
-                  </th>
+            <h3 className="mt-4 text-xl font-black text-slate-900 dark:text-white">
+              No rankings yet
+            </h3>
 
-                  <th className="px-6 py-4 text-right text-xs font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    Accuracy
-                  </th>
+            <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-500 dark:text-slate-400">
+              Complete a practice session or mock test this week to appear on
+              the leaderboard.
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            {/* Desktop table */}
+            <div className="hidden overflow-x-auto md:block">
+              <table className="w-full min-w-[650px] text-left">
+                <thead>
+                  <tr className="border-b border-slate-200 bg-slate-50 dark:border-slate-800 dark:bg-slate-950/70">
+                    <th className="px-6 py-4 text-xs font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Rank
+                    </th>
 
-                  <th className="px-6 py-4 text-right text-xs font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                    Points
-                  </th>
-                </tr>
-              </thead>
+                    <th className="px-6 py-4 text-xs font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Learner
+                    </th>
 
-              <tbody>
-                {rows.map(([name, accuracy, points], index) => {
-                  const rank = index + 1;
-                  const rankStyle = getRankStyle(rank);
-                  const isCurrentUser = name === "Radheshyam";
+                    <th className="px-6 py-4 text-right text-xs font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Accuracy
+                    </th>
 
-                  return (
-                    <tr
-                      key={name}
-                      className={`
-                        border-b border-slate-100 transition-colors last:border-b-0
-                        dark:border-slate-800/80
-                        ${
-                          isCurrentUser
-                            ? "bg-indigo-50/70 hover:bg-indigo-50 dark:bg-indigo-950/20 dark:hover:bg-indigo-950/30"
-                            : "hover:bg-slate-50 dark:hover:bg-slate-800/40"
-                        }
-                      `}
-                    >
-                      <td className="px-6 py-5">
-                        <div
-                          className={`inline-flex h-10 min-w-10 items-center justify-center rounded-xl px-2 text-sm font-black ${rankStyle.badge}`}
-                        >
-                          {rank <= 3 ? rankStyle.icon : `#${rank}`}
-                        </div>
-                      </td>
+                    <th className="px-6 py-4 text-right text-xs font-extrabold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                      Points
+                    </th>
+                  </tr>
+                </thead>
 
-                      <td className="px-6 py-5">
-                        <div className="flex items-center gap-3">
+                <tbody>
+                  {rows.map((row, index) => {
+                    const rank = index + 1;
+                    const rankStyle = getRankStyle(rank);
+
+                    return (
+                      <tr
+                        key={`${row.name}-${rank}`}
+                        className="border-b border-slate-100 transition-colors last:border-b-0 hover:bg-slate-50 dark:border-slate-800/80 dark:hover:bg-slate-800/40"
+                      >
+                        <td className="px-6 py-5">
                           <div
-                            className={`
-                              flex h-10 w-10 shrink-0 items-center justify-center
-                              rounded-full text-sm font-black
-                              ${
-                                isCurrentUser
-                                  ? "bg-indigo-600 text-white dark:bg-indigo-500"
-                                  : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-                              }
-                            `}
+                            className={`inline-flex h-10 min-w-10 items-center justify-center rounded-xl px-2 text-sm font-black ${rankStyle.badge}`}
                           >
-                            {name.charAt(0)}
+                            {rank <= 3 ? rankStyle.icon : `#${rank}`}
                           </div>
+                        </td>
 
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-slate-900 dark:text-white">
-                                {name}
-                              </span>
-
-                              {isCurrentUser && (
-                                <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
-                                  You
-                                </span>
-                              )}
+                        <td className="px-6 py-5">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-sm font-black text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                              {row.name.charAt(0).toUpperCase()}
                             </div>
 
-                            {rank === 1 && (
-                              <span className="text-xs text-slate-400 dark:text-slate-500">
-                                Current leader
+                            <div className="min-w-0">
+                              <span className="font-bold text-slate-900 dark:text-white">
+                                {row.name}
                               </span>
-                            )}
+
+                              <p className="mt-0.5 text-xs text-slate-400 dark:text-slate-500">
+                                {row.attempts}{" "}
+                                {row.attempts === 1
+                                  ? "attempt"
+                                  : "attempts"}
+                              </p>
+                            </div>
                           </div>
-                        </div>
-                      </td>
+                        </td>
 
-                      <td className="px-6 py-5 text-right">
-                        <span className="font-extrabold text-slate-900 dark:text-white">
-                          {accuracy}%
-                        </span>
-                      </td>
-
-                      <td className="px-6 py-5 text-right">
-                        <span className="font-black text-indigo-600 dark:text-indigo-400">
-                          {points.toLocaleString()}
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-
-          {/* Mobile cards */}
-          <div className="divide-y divide-slate-100 md:hidden dark:divide-slate-800">
-            {rows.map(([name, accuracy, points], index) => {
-              const rank = index + 1;
-              const rankStyle = getRankStyle(rank);
-              const isCurrentUser = name === "Radheshyam";
-
-              return (
-                <div
-                  key={name}
-                  className={`
-                    p-4 transition-colors
-                    ${
-                      isCurrentUser
-                        ? "bg-indigo-50/70 dark:bg-indigo-950/20"
-                        : ""
-                    }
-                  `}
-                >
-                  <div className="flex items-center gap-3">
-                    {/* Rank */}
-                    <div
-                      className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-black ${rankStyle.badge}`}
-                    >
-                      {rank <= 3 ? rankStyle.icon : `#${rank}`}
-                    </div>
-
-                    {/* Avatar */}
-                    <div
-                      className={`
-                        flex h-11 w-11 shrink-0 items-center justify-center
-                        rounded-full text-sm font-black
-                        ${
-                          isCurrentUser
-                            ? "bg-indigo-600 text-white dark:bg-indigo-500"
-                            : "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
-                        }
-                      `}
-                    >
-                      {name.charAt(0)}
-                    </div>
-
-                    {/* Name */}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="truncate font-bold text-slate-900 dark:text-white">
-                          {name}
-                        </span>
-
-                        {isCurrentUser && (
-                          <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-extrabold uppercase tracking-wide text-indigo-700 dark:bg-indigo-950/60 dark:text-indigo-300">
-                            You
+                        <td className="px-6 py-5 text-right">
+                          <span className="font-extrabold text-slate-900 dark:text-white">
+                            {row.accuracy}%
                           </span>
-                        )}
+                        </td>
+
+                        <td className="px-6 py-5 text-right">
+                          <span className="font-black text-indigo-600 dark:text-indigo-400">
+                            {row.points.toLocaleString()}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile cards */}
+            <div className="divide-y divide-slate-100 md:hidden dark:divide-slate-800">
+              {rows.map((row, index) => {
+                const rank = index + 1;
+                const rankStyle = getRankStyle(rank);
+
+                return (
+                  <div
+                    key={`${row.name}-${rank}`}
+                    className="p-4 transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/40"
+                  >
+                    <div className="flex items-center gap-3">
+                      {/* Rank */}
+                      <div
+                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-sm font-black ${rankStyle.badge}`}
+                      >
+                        {rank <= 3 ? rankStyle.icon : `#${rank}`}
                       </div>
 
-                      <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                        {accuracy}% accuracy
-                      </p>
-                    </div>
+                      {/* Avatar */}
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-slate-100 text-sm font-black text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                        {row.name.charAt(0).toUpperCase()}
+                      </div>
 
-                    {/* Points */}
-                    <div className="text-right">
-                      <p className="text-sm font-black text-indigo-600 dark:text-indigo-400">
-                        {points.toLocaleString()}
-                      </p>
+                      {/* Name */}
+                      <div className="min-w-0 flex-1">
+                        <span className="block truncate font-bold text-slate-900 dark:text-white">
+                          {row.name}
+                        </span>
 
-                      <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                        Points
-                      </p>
+                        <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                          {row.accuracy}% accuracy · {row.attempts}{" "}
+                          {row.attempts === 1 ? "attempt" : "attempts"}
+                        </p>
+                      </div>
+
+                      {/* Points */}
+                      <div className="text-right">
+                        <p className="text-sm font-black text-indigo-600 dark:text-indigo-400">
+                          {row.points.toLocaleString()}
+                        </p>
+
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                          Points
+                        </p>
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Bottom note */}
         <div className="mt-5 flex items-center justify-center text-center">
           <p className="text-xs leading-5 text-slate-400 dark:text-slate-500">
-            Rankings are based on weekly accuracy and points.
+            Rankings are calculated from results completed during the current
+            week.
           </p>
         </div>
       </main>

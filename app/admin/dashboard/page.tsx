@@ -1,9 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { signOut, useSession } from "next-auth/react";
+import { useEffect, useState } from "react";
 import {
   BarChart3,
   BookOpen,
+  Calendar,
   FileQuestion,
   LayoutDashboard,
   LogOut,
@@ -11,16 +14,55 @@ import {
   ShieldCheck,
   UserCheck,
   Users,
+  ClipboardList,
+  Upload,
+  Plus,
+  ArrowRight,
 } from "lucide-react";
+
+type Stats = {
+  users: number;
+  exams: number;
+  questions: number;
+  activeUsers: number;
+  mockTests: number;
+};
 
 export default function AdminDashboardPage() {
   const { data: session } = useSession();
 
   const adminName = session?.user?.name || "Administrator";
 
+  const [stats, setStats] = useState<Stats>({
+    users: 0,
+    exams: 0,
+    questions: 0,
+    activeUsers: 0,
+    mockTests: 0,
+  });
+
+  useEffect(() => {
+    async function loadStats() {
+      try {
+        const response = await fetch("/api/admin/stats");
+
+        if (!response.ok) return;
+
+        const data = await response.json();
+
+        setStats(data);
+      } catch (error) {
+        console.error("Failed to load admin stats", error);
+      }
+    }
+
+    loadStats();
+  }, []);
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-white">
-      <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+      {/* Header */}
+      {/* <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900">
@@ -29,7 +71,8 @@ export default function AdminDashboardPage() {
 
             <div>
               <p className="font-black">MCQ Admin</p>
-              <p className="text-xs text-slate-500">
+
+              <p className="text-xs text-slate-500 dark:text-slate-400">
                 Administration Panel
               </p>
             </div>
@@ -47,46 +90,66 @@ export default function AdminDashboardPage() {
             Logout
           </button>
         </div>
-      </header>
+      </header> */}
 
       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
         <div className="grid gap-6 lg:grid-cols-[240px_1fr]">
+          {/* Sidebar */}
           <aside className="hidden lg:block">
             <nav className="sticky top-8 rounded-3xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
               <AdminNav
+                href="/admin/dashboard"
                 icon={<LayoutDashboard size={18} />}
                 label="Dashboard"
                 active
               />
 
               <AdminNav
+                href="/admin/users"
                 icon={<Users size={18} />}
                 label="Users"
               />
 
               <AdminNav
+                href="/admin/exams"
                 icon={<BookOpen size={18} />}
                 label="Exams"
               />
 
               <AdminNav
+                href="/admin/questions"
                 icon={<FileQuestion size={18} />}
                 label="Questions"
               />
 
               <AdminNav
+                href="/admin/mock-tests"
+                icon={<ClipboardList size={18} />}
+                label="Mock Tests"
+              />
+              <AdminNav
+                href="/admin/daily-quiz"
+                icon={<Calendar size={18} />}
+                label="Daily Quiz"
+              />
+
+              <AdminNav
+                href="/admin/results"
                 icon={<BarChart3 size={18} />}
                 label="Results"
               />
 
               <AdminNav
+                href="/admin/settings"
                 icon={<Settings size={18} />}
                 label="Settings"
               />
             </nav>
           </aside>
 
+          {/* Content */}
           <section>
+            {/* Welcome */}
             <div className="rounded-3xl bg-slate-900 p-7 text-white shadow-xl sm:p-9">
               <p className="text-sm text-slate-300">
                 Administrator
@@ -96,61 +159,91 @@ export default function AdminDashboardPage() {
                 Welcome, {adminName}
               </h1>
 
-              <p className="mt-3 text-sm text-slate-300">
-                Manage users, exams, questions and platform
+              <p className="mt-3 max-w-2xl text-sm text-slate-300">
+                Manage users, exams, questions, mock tests and platform
                 performance from one place.
               </p>
+
+              <div className="mt-6 flex flex-wrap gap-3">
+                <Link
+                  href="/admin/questions/new"
+                  className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-bold text-slate-900 hover:bg-slate-100"
+                >
+                  <Plus className="h-4 w-4" />
+                  Add Question
+                </Link>
+
+                <Link
+                  href="/admin/questions/import"
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-slate-800"
+                >
+                  <Upload className="h-4 w-4" />
+                  Import Questions
+                </Link>
+              </div>
             </div>
 
+            {/* Stats */}
             <div className="mt-6 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
               <AdminStat
                 icon={<Users size={20} />}
                 title="Users"
-                value="0"
+                value={stats.users}
               />
 
               <AdminStat
                 icon={<BookOpen size={20} />}
                 title="Exams"
-                value="0"
+                value={stats.exams}
               />
 
               <AdminStat
                 icon={<FileQuestion size={20} />}
                 title="Questions"
-                value="0"
+                value={stats.questions}
               />
 
               <AdminStat
                 icon={<UserCheck size={20} />}
-                title="Active"
-                value="0"
+                title="Active Users"
+                value={stats.activeUsers}
               />
             </div>
 
-            <div className="mt-6 grid gap-6 lg:grid-cols-2">
+            {/* Management */}
+            <div className="mt-6 grid gap-6 md:grid-cols-2">
               <AdminPanel
-                title="User Management"
-                description="Manage registered students and their access."
-                icon={<Users size={22} />}
+                href="/admin/questions"
+                title="Question Bank"
+                description="Add, edit, delete, search and import MCQ questions."
+                icon={<FileQuestion size={22} />}
               />
 
               <AdminPanel
+                href="/admin/exams"
                 title="Exam Management"
                 description="Create and manage exams and categories."
                 icon={<BookOpen size={22} />}
               />
 
               <AdminPanel
-                title="Question Bank"
-                description="Add, edit and organize MCQ questions."
-                icon={<FileQuestion size={22} />}
+                href="/admin/mock-tests"
+                title="Mock Tests"
+                description="Create demo and login-required mock tests."
+                icon={<ClipboardList size={22} />}
+              />
+              <AdminPanel
+                href="/admin/daily-quiz"
+                title="Daily Quiz"
+                description="Manage daily quiz questions and schedules."
+                icon={<Calendar size={22} />}
               />
 
               <AdminPanel
-                title="Analytics"
-                description="Review student performance and results."
-                icon={<BarChart3 size={22} />}
+                href="/admin/users"
+                title="User Management"
+                description="Manage registered students and account access."
+                icon={<Users size={22} />}
               />
             </div>
           </section>
@@ -161,16 +254,19 @@ export default function AdminDashboardPage() {
 }
 
 function AdminNav({
+  href,
   icon,
   label,
   active = false,
 }: {
+  href: string;
   icon: React.ReactNode;
   label: string;
   active?: boolean;
 }) {
   return (
-    <button
+    <Link
+      href={href}
       className={`mb-1 flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-bold transition ${
         active
           ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900"
@@ -179,7 +275,7 @@ function AdminNav({
     >
       {icon}
       {label}
-    </button>
+    </Link>
   );
 }
 
@@ -190,7 +286,7 @@ function AdminStat({
 }: {
   icon: React.ReactNode;
   title: string;
-  value: string;
+  value: number;
 }) {
   return (
     <div className="rounded-3xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
@@ -199,10 +295,12 @@ function AdminStat({
           {icon}
         </div>
 
-        <span className="text-2xl font-black">{value}</span>
+        <span className="text-2xl font-black">
+          {value}
+        </span>
       </div>
 
-      <p className="mt-4 text-sm font-bold text-slate-500">
+      <p className="mt-4 text-sm font-bold text-slate-500 dark:text-slate-400">
         {title}
       </p>
     </div>
@@ -210,32 +308,279 @@ function AdminStat({
 }
 
 function AdminPanel({
+  href,
   title,
   description,
   icon,
 }: {
+  href: string;
   title: string;
   description: string;
   icon: React.ReactNode;
 }) {
   return (
-    <button className="group rounded-3xl border border-slate-200 bg-white p-6 text-left transition hover:-translate-y-1 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900">
+    <Link
+      href={href}
+      className="group rounded-3xl border border-slate-200 bg-white p-6 text-left transition hover:-translate-y-1 hover:border-indigo-300 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900 dark:hover:border-indigo-500/40"
+    >
       <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-800">
         {icon}
       </div>
 
-      <h2 className="font-black">{title}</h2>
+      <h2 className="font-black">
+        {title}
+      </h2>
 
       <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
         {description}
       </p>
 
-      <span className="mt-5 inline-block text-sm font-bold group-hover:underline">
-        Manage →
+      <span className="mt-5 inline-flex items-center gap-1 text-sm font-bold text-indigo-600 dark:text-indigo-400">
+        Manage
+        <ArrowRight className="h-4 w-4 transition group-hover:translate-x-1" />
       </span>
-    </button>
+    </Link>
   );
 }
+
+// "use client";
+
+// import { signOut, useSession } from "next-auth/react";
+// import {
+//   BarChart3,
+//   BookOpen,
+//   FileQuestion,
+//   LayoutDashboard,
+//   LogOut,
+//   Settings,
+//   ShieldCheck,
+//   UserCheck,
+//   Users,
+// } from "lucide-react";
+
+// export default function AdminDashboardPage() {
+//   const { data: session } = useSession();
+
+//   const adminName = session?.user?.name || "Administrator";
+
+//   return (
+//     <main className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-white">
+//       <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+//         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
+//           <div className="flex items-center gap-3">
+//             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 text-white dark:bg-white dark:text-slate-900">
+//               <ShieldCheck size={21} />
+//             </div>
+
+//             <div>
+//               <p className="font-black">MCQ Admin</p>
+//               <p className="text-xs text-slate-500">
+//                 Administration Panel
+//               </p>
+//             </div>
+//           </div>
+
+//           <button
+//             onClick={() =>
+//               signOut({
+//                 callbackUrl: "/admin/login",
+//               })
+//             }
+//             className="flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-sm font-bold hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+//           >
+//             <LogOut size={16} />
+//             Logout
+//           </button>
+//         </div>
+//       </header>
+
+//       <div className="mx-auto max-w-7xl px-4 py-8 sm:px-6 lg:px-8">
+//         <div className="grid gap-6 lg:grid-cols-[240px_1fr]">
+//           <aside className="hidden lg:block">
+//             <nav className="sticky top-8 rounded-3xl border border-slate-200 bg-white p-3 dark:border-slate-800 dark:bg-slate-900">
+//               <AdminNav
+//                 icon={<LayoutDashboard size={18} />}
+//                 label="Dashboard"
+//                 active
+//               />
+
+//               <AdminNav
+//                 icon={<Users size={18} />}
+//                 label="Users"
+//               />
+
+//               <AdminNav
+//                 icon={<BookOpen size={18} />}
+//                 label="Exams"
+//               />
+
+//               <AdminNav
+//                 icon={<FileQuestion size={18} />}
+//                 label="Questions"
+//               />
+
+//               <AdminNav
+//                 icon={<BarChart3 size={18} />}
+//                 label="Results"
+//               />
+
+//               <AdminNav
+//                 icon={<Settings size={18} />}
+//                 label="Settings"
+//               />
+//             </nav>
+//           </aside>
+
+//           <section>
+//             <div className="rounded-3xl bg-slate-900 p-7 text-white shadow-xl sm:p-9">
+//               <p className="text-sm text-slate-300">
+//                 Administrator
+//               </p>
+
+//               <h1 className="mt-2 text-3xl font-black sm:text-4xl">
+//                 Welcome, {adminName}
+//               </h1>
+
+//               <p className="mt-3 text-sm text-slate-300">
+//                 Manage users, exams, questions and platform
+//                 performance from one place.
+//               </p>
+//             </div>
+
+//             <div className="mt-6 grid gap-5 sm:grid-cols-2 xl:grid-cols-4">
+//               <AdminStat
+//                 icon={<Users size={20} />}
+//                 title="Users"
+//                 value="0"
+//               />
+
+//               <AdminStat
+//                 icon={<BookOpen size={20} />}
+//                 title="Exams"
+//                 value="0"
+//               />
+
+//               <AdminStat
+//                 icon={<FileQuestion size={20} />}
+//                 title="Questions"
+//                 value="0"
+//               />
+
+//               <AdminStat
+//                 icon={<UserCheck size={20} />}
+//                 title="Active"
+//                 value="0"
+//               />
+//             </div>
+
+//             <div className="mt-6 grid gap-6 lg:grid-cols-2">
+//               <AdminPanel
+//                 title="User Management"
+//                 description="Manage registered students and their access."
+//                 icon={<Users size={22} />}
+//               />
+
+//               <AdminPanel
+//                 title="Exam Management"
+//                 description="Create and manage exams and categories."
+//                 icon={<BookOpen size={22} />}
+//               />
+
+//               <AdminPanel
+//                 title="Question Bank"
+//                 description="Add, edit and organize MCQ questions."
+//                 icon={<FileQuestion size={22} />}
+//               />
+
+//               <AdminPanel
+//                 title="Analytics"
+//                 description="Review student performance and results."
+//                 icon={<BarChart3 size={22} />}
+//               />
+//             </div>
+//           </section>
+//         </div>
+//       </div>
+//     </main>
+//   );
+// }
+
+// function AdminNav({
+//   icon,
+//   label,
+//   active = false,
+// }: {
+//   icon: React.ReactNode;
+//   label: string;
+//   active?: boolean;
+// }) {
+//   return (
+//     <button
+//       className={`mb-1 flex w-full items-center gap-3 rounded-xl px-4 py-3 text-sm font-bold transition ${
+//         active
+//           ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900"
+//           : "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
+//       }`}
+//     >
+//       {icon}
+//       {label}
+//     </button>
+//   );
+// }
+
+// function AdminStat({
+//   icon,
+//   title,
+//   value,
+// }: {
+//   icon: React.ReactNode;
+//   title: string;
+//   value: string;
+// }) {
+//   return (
+//     <div className="rounded-3xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+//       <div className="flex items-center justify-between">
+//         <div className="rounded-xl bg-slate-100 p-3 dark:bg-slate-800">
+//           {icon}
+//         </div>
+
+//         <span className="text-2xl font-black">{value}</span>
+//       </div>
+
+//       <p className="mt-4 text-sm font-bold text-slate-500">
+//         {title}
+//       </p>
+//     </div>
+//   );
+// }
+
+// function AdminPanel({
+//   title,
+//   description,
+//   icon,
+// }: {
+//   title: string;
+//   description: string;
+//   icon: React.ReactNode;
+// }) {
+//   return (
+//     <button className="group rounded-3xl border border-slate-200 bg-white p-6 text-left transition hover:-translate-y-1 hover:shadow-lg dark:border-slate-800 dark:bg-slate-900">
+//       <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-slate-100 dark:bg-slate-800">
+//         {icon}
+//       </div>
+
+//       <h2 className="font-black">{title}</h2>
+
+//       <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+//         {description}
+//       </p>
+
+//       <span className="mt-5 inline-block text-sm font-bold group-hover:underline">
+//         Manage →
+//       </span>
+//     </button>
+//   );
+// }
 
 
 

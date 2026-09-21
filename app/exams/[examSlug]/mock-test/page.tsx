@@ -1,4 +1,3 @@
-
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import {
@@ -8,8 +7,10 @@ import {
   Sparkles,
 } from "lucide-react";
 
-import { getExam } from "@/data/exams";
-import { mockTests } from "@/data/mockTests";
+import { connectDB } from "@/lib/mongodb";
+import { Exam } from "@/models/Exam";
+import { Question } from "@/models/Question";
+
 import { TestCard } from "@/components/mock-test/TestCard";
 
 type ExamMockTestsProps = {
@@ -18,18 +19,148 @@ type ExamMockTestsProps = {
   }>;
 };
 
+type MockTest = {
+  id: string;
+  slug: string;
+  title: string;
+  examSlug: string;
+  description: string;
+  totalQuestions: number;
+  questions: number;
+  durationMinutes: number;
+  duration: number;
+  difficulty: "Easy" | "Medium" | "Hard";
+};
+
 export default async function ExamMockTests({
   params,
 }: ExamMockTestsProps) {
   const { examSlug } = await params;
 
-  const exam = getExam(examSlug);
+  await connectDB();
 
-  if (!exam) {
+  // Get exam from MongoDB
+  const examDoc = await Exam.findOne({
+    slug: examSlug.toLowerCase(),
+    isActive: true,
+  }).lean();
+
+  if (!examDoc) {
     notFound();
   }
 
-  const tests = mockTests.filter((test) => test.examSlug === examSlug);
+  /*
+   * Get active questions for this exam.
+   *
+   * Since mock tests are not yet stored in a separate MongoDB
+   * MockTest collection, we generate mock-test cards from the
+   * questions currently available for this exam.
+   */
+  const questions = await Question.find({
+    examId: examDoc._id,
+    isActive: true,
+  })
+    .select("_id difficulty")
+    .lean();
+
+  const totalQuestions = questions.length;
+
+  /*
+   * Create mock tests.
+   *
+   * You can later replace this section with a MockTest model
+   * when you want admin-created mock tests.
+   */
+  const tests: MockTest[] = [];
+
+  if (totalQuestions > 0) {
+    const easyQuestions = questions.filter(
+      (question) => question.difficulty === "Easy"
+    ).length;
+
+    const mediumQuestions = questions.filter(
+      (question) => question.difficulty === "Medium"
+    ).length;
+
+    const hardQuestions = questions.filter(
+      (question) => question.difficulty === "Hard"
+    ).length;
+
+    // Full Mock Test
+    tests.push({
+      id: `${examDoc._id}-full`,
+      slug: `${examDoc.slug}-full`,
+      title: `${examDoc.name} Full Mock Test`,
+      examSlug: examDoc.slug,
+      description:
+        "Complete exam-style mock test covering questions from this exam.",
+      totalQuestions: Math.min(totalQuestions, 100),
+      questions: Math.min(totalQuestions, 100),
+      durationMinutes: examDoc.durationMinutes || 60,
+      duration: examDoc.durationMinutes || 60,
+      difficulty: "Medium",
+    });
+
+    // Medium Practice Mock
+    if (mediumQuestions >= 20) {
+      tests.push({
+        id: `${examDoc._id}-medium`,
+        slug: `${examDoc.slug}-medium`,
+        title: `${examDoc.name} Medium Mock Test`,
+        examSlug: examDoc.slug,
+        description:
+          "Practice with a balanced set of medium-difficulty questions.",
+        totalQuestions: Math.min(mediumQuestions, 50),
+        questions: Math.min(mediumQuestions, 50),
+        durationMinutes: 45,
+        duration: 45,
+        difficulty: "Medium",
+      });
+    }
+
+    // Hard Mock
+    if (hardQuestions >= 20) {
+      tests.push({
+        id: `${examDoc._id}-hard`,
+        slug: `${examDoc.slug}-hard`,
+        title: `${examDoc.name} Hard Mock Test`,
+        examSlug: examDoc.slug,
+        description:
+          "Challenge yourself with difficult questions from this exam.",
+        totalQuestions: Math.min(hardQuestions, 50),
+        questions: Math.min(hardQuestions, 50),
+        durationMinutes: 45,
+        duration: 45,
+        difficulty: "Hard",
+      });
+    }
+
+    // Easy Mock
+    if (easyQuestions >= 20) {
+      tests.push({
+        id: `${examDoc._id}-easy`,
+        slug: `${examDoc.slug}-easy`,
+        title: `${examDoc.name} Easy Mock Test`,
+        examSlug: examDoc.slug,
+        description:
+          "Build your fundamentals with easy-level questions.",
+        totalQuestions: Math.min(easyQuestions, 50),
+        questions: Math.min(easyQuestions, 50),
+        durationMinutes: 45,
+        duration: 45,
+        difficulty: "Easy",
+      });
+    }
+  }
+
+  const exam = {
+    _id: examDoc._id.toString(),
+    name: examDoc.name,
+    slug: examDoc.slug,
+    description: examDoc.description || "",
+    durationMinutes: examDoc.durationMinutes || 60,
+    isActive: examDoc.isActive !== false,
+  };
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 transition-colors dark:bg-slate-950 dark:text-white">
@@ -107,6 +238,7 @@ export default async function ExamMockTests({
                     <p className="text-2xl font-black text-slate-900 dark:text-white">
                       {tests.length}
                     </p>
+
                     <p className="text-xs font-semibold text-slate-500 dark:text-slate-400">
                       {tests.length === 1 ? "Mock Test" : "Mock Tests"}
                     </p>
@@ -149,7 +281,10 @@ export default async function ExamMockTests({
           {tests.length > 0 ? (
             <div className="mt-6 grid gap-5 md:grid-cols-2">
               {tests.map((test) => (
-                <TestCard key={test.id} {...test} />
+                <TestCard
+                  key={test.id}
+                  {...test}
+                />
               ))}
             </div>
           ) : (

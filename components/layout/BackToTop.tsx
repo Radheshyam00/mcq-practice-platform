@@ -1,8 +1,18 @@
 "use client";
 
+import { useEffect } from "react";
 import { ArrowUp } from "lucide-react";
 
 export function BackToTop() {
+  useEffect(() => {
+    // Go to top when the page is refreshed/loaded
+    window.scrollTo({
+      top: 0,
+      left: 0,
+      behavior: "auto",
+    });
+  }, []);
+
   const scrollToTop = () => {
     window.scrollTo({
       top: 0,
