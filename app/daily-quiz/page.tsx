@@ -1,7 +1,7 @@
-import { getServerSession } from "next-auth";
-import { redirect } from "next/navigation";
 
-import { connectDB} from "@/lib/mongodb";
+import { getServerSession } from "next-auth";
+
+import { connectDB } from "@/lib/mongodb";
 import { Exam } from "@/models/Exam";
 import { Question } from "@/models/Question";
 import { QuizContainer } from "@/components/quiz/QuizContainer";
@@ -19,12 +19,21 @@ export default async function DailyQuizPage() {
   /*
    * Find an active exam that has Daily Quiz questions.
    *
+   * Guests:
+   *   - Only look for demo Daily Quiz questions.
+   *
+   * Logged-in users:
+   *   - Can access all active Daily Quiz questions.
+   *
    * We use one exam so QuizContainer can save the result
    * with a valid examId.
    */
   const dailyExam = await Question.findOne({
     isDailyQuiz: true,
     isActive: true,
+
+    // Guests can only use demo Daily Quiz content.
+    ...(isLoggedIn ? {} : { demo: true }),
   })
     .select("examId")
     .sort({ createdAt: -1 })
@@ -41,6 +50,12 @@ export default async function DailyQuizPage() {
 
   /*
    * Get Daily Quiz questions for this exam.
+   *
+   * Guests:
+   *   - Only demo questions.
+   *
+   * Logged-in users:
+   *   - All active Daily Quiz questions.
    */
   let questionDocs: any[] = [];
 
@@ -49,6 +64,9 @@ export default async function DailyQuizPage() {
       examId: examDoc._id,
       isDailyQuiz: true,
       isActive: true,
+
+      // Guests can only access demo questions.
+      ...(isLoggedIn ? {} : { demo: true }),
     })
       .sort({ createdAt: -1 })
       .lean();
@@ -75,7 +93,7 @@ export default async function DailyQuizPage() {
     explanation: question.explanation ?? "",
     exam: question.exam ?? examDoc?.name ?? "",
     subject: question.subject ?? "",
-    topic: question.topic,
+    topic: question.topic ?? "",
     difficulty: question.difficulty,
   }));
 
@@ -248,3 +266,4 @@ export default async function DailyQuizPage() {
     </div>
   );
 }
+

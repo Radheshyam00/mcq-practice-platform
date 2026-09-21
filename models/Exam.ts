@@ -16,13 +16,10 @@ export interface IExam extends Document {
   name: string;
   slug: string;
   description: string;
-
   subjects: ISubject[];
-
   durationMinutes: number;
-
   isActive: boolean;
-
+  demo: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -91,8 +88,13 @@ const ExamSchema = new Schema<IExam>(
       type: Boolean,
       default: true,
     },
-  },
 
+    demo: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+  },
   {
     timestamps: true,
   }

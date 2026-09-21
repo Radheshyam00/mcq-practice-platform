@@ -5,6 +5,8 @@ import mongoose, {
   models,
 } from "mongoose";
 
+import "@/models/Exam";
+
 export interface IMockTest extends Document {
   title: string;
   slug: string;
