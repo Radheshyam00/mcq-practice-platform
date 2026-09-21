@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
-import mongoose from "mongoose";
 
 import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongodb";
@@ -14,39 +13,30 @@ import {
 
 const MAX_IMPORT_ROWS = 1000;
 
-async function requireAdmin() {
+async function requireAdmin(): Promise<NextResponse | null> {
   const session = await getServerSession(authOptions);
 
   if (!session?.user) {
-    return {
-      authorized: false,
-      response: NextResponse.json(
-        {
-          success: false,
-          message: "Authentication required.",
-        },
-        { status: 401 }
-      ),
-    };
+    return NextResponse.json(
+      {
+        success: false,
+        message: "Authentication required.",
+      },
+      { status: 401 }
+    );
   }
 
   if (session.user.role !== "admin") {
-    return {
-      authorized: false,
-      response: NextResponse.json(
-        {
-          success: false,
-          message: "Admin access required.",
-        },
-        { status: 403 }
-      ),
-    };
+    return NextResponse.json(
+      {
+        success: false,
+        message: "Admin access required.",
+      },
+      { status: 403 }
+    );
   }
 
-  return {
-    authorized: true,
-    response: null,
-  };
+  return null;
 }
 
 function normalizeText(value: unknown) {
@@ -56,7 +46,7 @@ function normalizeText(value: unknown) {
     .trim();
 }
 
-export async function POST(request: Request) {
+export async function POST(request: Request): Promise<Response> {
   try {
     /*
      * -----------------------------------------
@@ -64,10 +54,10 @@ export async function POST(request: Request) {
      * -----------------------------------------
      */
 
-    const auth = await requireAdmin();
+    const authResponse = await requireAdmin();
 
-    if (!auth.authorized) {
-      return auth.response;
+    if (authResponse) {
+      return authResponse;
     }
 
     /*
@@ -240,14 +230,20 @@ export async function POST(request: Request) {
      * Track duplicates inside the
      * current import file itself.
      */
+
     const importKeys = new Set<string>();
 
-    for (let index = 0; index < questions.length; index++) {
+    for (
+      let index = 0;
+      index < questions.length;
+      index++
+    ) {
       const item = questions[index];
 
       const rowNumber = index + 1;
 
       const examName = normalizeText(item.exam);
+
       const subjectName = normalizeText(
         item.subject
       );
@@ -255,6 +251,7 @@ export async function POST(request: Request) {
       /*
        * Find exam by name OR slug.
        */
+
       const exam = examMap.get(examName);
 
       if (!exam) {
@@ -269,15 +266,18 @@ export async function POST(request: Request) {
       /*
        * Find subject inside selected exam.
        */
+
       const subject = exam.subjects.find(
         (subjectItem: {
           name?: string;
           slug?: string;
         }) =>
-          normalizeText(subjectItem.name ?? "") ===
-            subjectName ||
-          normalizeText(subjectItem.slug ?? "") ===
-            subjectName
+          normalizeText(
+            subjectItem.name ?? ""
+          ) === subjectName ||
+          normalizeText(
+            subjectItem.slug ?? ""
+          ) === subjectName
       );
 
       if (!subject) {
@@ -336,6 +336,7 @@ export async function POST(request: Request) {
         /*
          * New MongoDB relationships
          */
+
         examId: exam._id,
 
         subjectId: subject._id,
@@ -344,11 +345,14 @@ export async function POST(request: Request) {
          * Keep old fields temporarily
          * for compatibility.
          */
+
         exam: exam.name,
 
         subject: subject.name,
 
-        topic: String(item.topic).trim(),
+        topic: String(
+          item.topic
+        ).trim(),
 
         difficulty:
           item.difficulty || "Medium",
@@ -375,9 +379,12 @@ export async function POST(request: Request) {
             "Some questions could not be mapped to existing exams or subjects.",
           errors: mappingErrors,
           total: questions.length,
-          validCount: validation.questions.length,
-          mappedCount: preparedQuestions.length,
-          errorCount: mappingErrors.length,
+          validCount:
+            validation.questions.length,
+          mappedCount:
+            preparedQuestions.length,
+          errorCount:
+            mappingErrors.length,
         },
         { status: 400 }
       );
@@ -427,7 +434,9 @@ export async function POST(request: Request) {
         (item) =>
           `${String(
             item.examId
-          )}::${normalizeText(item.question)}`
+          )}::${normalizeText(
+            item.question
+          )}`
       )
     );
 
@@ -442,7 +451,9 @@ export async function POST(request: Request) {
         const key =
           `${String(
             item.examId
-          )}::${normalizeText(item.question)}`;
+          )}::${normalizeText(
+            item.question
+          )}`;
 
         return !existingKeys.has(key);
       });
