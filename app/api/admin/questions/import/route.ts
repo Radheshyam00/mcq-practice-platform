@@ -13,6 +13,19 @@ import {
 
 const MAX_IMPORT_ROWS = 1000;
 
+type ExamSubject = {
+  _id?: unknown;
+  name?: string;
+  slug?: string;
+};
+
+type ExamDocument = {
+  _id: unknown;
+  name?: string;
+  slug?: string;
+  subjects?: ExamSubject[];
+};
+
 async function requireAdmin(): Promise<NextResponse | null> {
   const session = await getServerSession(authOptions);
 
@@ -39,14 +52,115 @@ async function requireAdmin(): Promise<NextResponse | null> {
   return null;
 }
 
-function normalizeText(value: unknown) {
+function normalizeText(value: unknown): string {
   return String(value ?? "")
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim();
 }
 
-export async function POST(request: Request): Promise<Response> {
+function normalizeId(value: unknown): string {
+  return String(value ?? "").trim();
+}
+
+/*
+ * Find exam by:
+ * 1. MongoDB _id
+ * 2. name
+ * 3. slug
+ */
+function findExam(
+  exams: ExamDocument[],
+  value: unknown
+): ExamDocument | null {
+  const search = normalizeText(value);
+
+  if (!search) {
+    return null;
+  }
+
+  for (const exam of exams) {
+    if (normalizeId(exam._id) === String(value).trim()) {
+      return exam;
+    }
+
+    if (
+      normalizeText(exam.name) === search ||
+      normalizeText(exam.slug) === search
+    ) {
+      return exam;
+    }
+  }
+
+  return null;
+}
+
+/*
+ * Find subject inside selected exam by:
+ * 1. MongoDB _id
+ * 2. name
+ * 3. slug
+ */
+function findSubject(
+  exam: ExamDocument,
+  value: unknown
+): ExamSubject | null {
+  const search = normalizeText(value);
+
+  if (!search) {
+    return null;
+  }
+
+  const subjects = Array.isArray(exam.subjects)
+    ? exam.subjects
+    : [];
+
+  for (const subject of subjects) {
+    if (
+      normalizeId(subject._id) ===
+      String(value).trim()
+    ) {
+      return subject;
+    }
+
+    if (
+      normalizeText(subject.name) === search ||
+      normalizeText(subject.slug) === search
+    ) {
+      return subject;
+    }
+  }
+
+  return null;
+}
+
+function getExamSuggestions(
+  exams: ExamDocument[]
+) {
+  return exams.map((exam) => ({
+    id: String(exam._id),
+    name: exam.name ?? "",
+    slug: exam.slug ?? "",
+  }));
+}
+
+function getSubjectSuggestions(
+  exam: ExamDocument | null
+) {
+  if (!exam || !Array.isArray(exam.subjects)) {
+    return [];
+  }
+
+  return exam.subjects.map((subject) => ({
+    id: String(subject._id ?? ""),
+    name: subject.name ?? "",
+    slug: subject.slug ?? "",
+  }));
+}
+
+export async function POST(
+  request: Request
+): Promise<Response> {
   try {
     /*
      * -----------------------------------------
@@ -103,7 +217,7 @@ export async function POST(request: Request): Promise<Response> {
 
     /*
      * -----------------------------------------
-     * VALIDATE CSV / JSON ROWS
+     * LOCAL VALIDATION
      * -----------------------------------------
      */
 
@@ -117,25 +231,10 @@ export async function POST(request: Request): Promise<Response> {
      * -----------------------------------------
      */
 
-    if (action === "validate") {
-      return NextResponse.json({
-        success: validation.errors.length === 0,
-        valid: validation.errors.length === 0,
-        total: rows.length,
-        validCount: validation.questions.length,
-        errorCount: validation.errors.length,
-        questions: validation.questions,
-        errors: validation.errors,
-      });
-    }
-
-    /*
-     * -----------------------------------------
-     * IMPORT ACTION
-     * -----------------------------------------
-     */
-
-    if (action !== "import") {
+    if (
+      action !== "validate" &&
+      action !== "import"
+    ) {
       return NextResponse.json(
         {
           success: false,
@@ -148,7 +247,144 @@ export async function POST(request: Request): Promise<Response> {
 
     /*
      * -----------------------------------------
-     * STOP IF VALIDATION ERRORS EXIST
+     * DATABASE CONNECTION
+     * -----------------------------------------
+     *
+     * We load exams during BOTH validation
+     * and import so that the frontend can show
+     * useful mapping errors before importing.
+     */
+
+    await connectDB();
+
+    const exams = (await Exam.find(
+      {},
+      {
+        _id: 1,
+        name: 1,
+        slug: 1,
+        subjects: 1,
+      }
+    ).lean()) as unknown as ExamDocument[];
+
+    /*
+     * -----------------------------------------
+     * VALIDATION ACTION
+     * -----------------------------------------
+     */
+
+    if (action === "validate") {
+      const mappingErrors: Array<{
+        row: number;
+        field: string;
+        message: string;
+        suggestion?: string;
+      }> = [];
+
+      /*
+       * Only perform DB mapping when the row
+       * itself passed basic validation.
+       */
+
+      for (
+        let index = 0;
+        index < validation.questions.length;
+        index++
+      ) {
+        const item =
+          validation.questions[index];
+
+        /*
+         * Find original row number.
+         *
+         * validateImportRows uses:
+         * index + 2
+         */
+
+        const rowNumber = index + 2;
+
+        const exam = findExam(
+          exams,
+          item.exam
+        );
+
+        if (!exam) {
+          mappingErrors.push({
+            row: rowNumber,
+            field: "exam",
+            message: `Exam "${item.exam}" was not found in MongoDB.`,
+            suggestion:
+              "Use an existing exam name or slug from the exam list.",
+          });
+
+          continue;
+        }
+
+        const subject = findSubject(
+          exam,
+          item.subject
+        );
+
+        if (!subject) {
+          const availableSubjects =
+            getSubjectSuggestions(exam);
+
+          const subjectNames =
+            availableSubjects
+              .map((item) => item.name)
+              .filter(Boolean)
+              .slice(0, 10)
+              .join(", ");
+
+          mappingErrors.push({
+            row: rowNumber,
+            field: "subject",
+            message: `Subject "${item.subject}" was not found inside exam "${exam.name}".`,
+            suggestion: subjectNames
+              ? `Use one of these subjects: ${subjectNames}`
+              : "Add a subject to this exam first.",
+          });
+        }
+      }
+
+      const allErrors = [
+        ...validation.errors,
+        ...mappingErrors,
+      ];
+
+      return NextResponse.json({
+        success: allErrors.length === 0,
+        valid: allErrors.length === 0,
+
+        total: rows.length,
+
+        validCount:
+          validation.questions.length,
+
+        errorCount: allErrors.length,
+
+        questions: validation.questions,
+
+        errors: allErrors,
+
+        /*
+         * Useful for the frontend editor.
+         */
+
+        exams: getExamSuggestions(exams),
+
+        subjectsByExam: Object.fromEntries(
+          exams.map((exam) => [
+            String(exam._id),
+            getSubjectSuggestions(exam),
+          ])
+        ),
+      });
+    }
+
+    /*
+     * -----------------------------------------
+     * IMPORT ACTION
      * -----------------------------------------
      */
 
@@ -164,28 +400,8 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    await connectDB();
-
     const questions =
       validation.questions as ImportQuestion[];
-
-    /*
-     * -----------------------------------------
-     * LOAD ALL EXAMS
-     * -----------------------------------------
-     *
-     * Subjects are embedded inside Exam.
-     */
-
-    const exams = await Exam.find(
-      {},
-      {
-        _id: 1,
-        name: 1,
-        slug: 1,
-        subjects: 1,
-      }
-    ).lean();
 
     /*
      * -----------------------------------------
@@ -195,25 +411,33 @@ export async function POST(request: Request): Promise<Response> {
 
     const examMap = new Map<
       string,
-      (typeof exams)[number]
+      ExamDocument
     >();
 
     for (const exam of exams) {
-      examMap.set(
-        normalizeText(exam.name),
-        exam
-      );
+      if (exam.name) {
+        examMap.set(
+          normalizeText(exam.name),
+          exam
+        );
+      }
+
+      if (exam.slug) {
+        examMap.set(
+          normalizeText(exam.slug),
+          exam
+        );
+      }
 
       examMap.set(
-        normalizeText(exam.slug),
+        normalizeId(exam._id),
         exam
       );
     }
 
     /*
      * -----------------------------------------
-     * CONVERT IMPORT ROWS
-     * TO MONGODB QUESTIONS
+     * PREPARE QUESTIONS
      * -----------------------------------------
      */
 
@@ -223,12 +447,14 @@ export async function POST(request: Request): Promise<Response> {
 
     const mappingErrors: Array<{
       row: number;
+      field: string;
       message: string;
+      suggestion?: string;
     }> = [];
 
     /*
-     * Track duplicates inside the
-     * current import file itself.
+     * Duplicate questions inside current
+     * import file.
      */
 
     const importKeys = new Set<string>();
@@ -240,50 +466,63 @@ export async function POST(request: Request): Promise<Response> {
     ) {
       const item = questions[index];
 
-      const rowNumber = index + 1;
-
-      const examName = normalizeText(item.exam);
-
-      const subjectName = normalizeText(
-        item.subject
-      );
-
       /*
-       * Find exam by name OR slug.
+       * IMPORTANT:
+       *
+       * validation row numbers start at 2.
        */
 
-      const exam = examMap.get(examName);
+      const rowNumber = index + 2;
+
+      const examValue = normalizeText(
+        item.exam
+      );
+
+      const exam =
+        examMap.get(examValue);
 
       if (!exam) {
         mappingErrors.push({
           row: rowNumber,
+          field: "exam",
           message: `Exam "${item.exam}" was not found in MongoDB.`,
+          suggestion:
+            "Use an existing exam name, slug, or MongoDB exam ID.",
         });
 
         continue;
       }
 
       /*
-       * Find subject inside selected exam.
+       * ---------------------------------------
+       * SUBJECT
+       * ---------------------------------------
        */
 
-      const subject = exam.subjects.find(
-        (subjectItem: {
-          name?: string;
-          slug?: string;
-        }) =>
-          normalizeText(
-            subjectItem.name ?? ""
-          ) === subjectName ||
-          normalizeText(
-            subjectItem.slug ?? ""
-          ) === subjectName
-      );
+      const subject =
+        findSubject(
+          exam,
+          item.subject
+        );
 
       if (!subject) {
+        const availableSubjects =
+          getSubjectSuggestions(exam);
+
+        const subjectNames =
+          availableSubjects
+            .map((item) => item.name)
+            .filter(Boolean)
+            .slice(0, 10)
+            .join(", ");
+
         mappingErrors.push({
           row: rowNumber,
+          field: "subject",
           message: `Subject "${item.subject}" was not found inside exam "${exam.name}".`,
+          suggestion: subjectNames
+            ? `Available subjects: ${subjectNames}`
+            : "Add this subject to the selected exam first.",
         });
 
         continue;
@@ -293,8 +532,6 @@ export async function POST(request: Request): Promise<Response> {
        * ---------------------------------------
        * DUPLICATE KEY
        * ---------------------------------------
-       *
-       * exam + question
        */
 
       const duplicateKey =
@@ -310,14 +547,13 @@ export async function POST(request: Request): Promise<Response> {
 
       /*
        * ---------------------------------------
-       * PREPARE MONGODB DOCUMENT
+       * PREPARE DOCUMENT
        * ---------------------------------------
        */
 
       preparedQuestions.push({
-        question: String(
-          item.question
-        ).trim(),
+        question:
+          String(item.question).trim(),
 
         options: item.options.map(
           (option: string) =>
@@ -329,12 +565,13 @@ export async function POST(request: Request): Promise<Response> {
         ),
 
         explanation:
-          typeof item.explanation === "string"
+          typeof item.explanation ===
+          "string"
             ? item.explanation.trim()
             : "",
 
         /*
-         * New MongoDB relationships
+         * MongoDB relationships
          */
 
         examId: exam._id,
@@ -342,17 +579,19 @@ export async function POST(request: Request): Promise<Response> {
         subjectId: subject._id,
 
         /*
-         * Keep old fields temporarily
-         * for compatibility.
+         * Backward compatibility
          */
 
-        exam: exam.name,
+        exam:
+          exam.name ??
+          String(item.exam).trim(),
 
-        subject: subject.name,
+        subject:
+          subject.name ??
+          String(item.subject).trim(),
 
-        topic: String(
-          item.topic
-        ).trim(),
+        topic:
+          String(item.topic).trim(),
 
         difficulty:
           item.difficulty || "Medium",
@@ -375,16 +614,35 @@ export async function POST(request: Request): Promise<Response> {
       return NextResponse.json(
         {
           success: false,
+
           message:
             "Some questions could not be mapped to existing exams or subjects.",
+
           errors: mappingErrors,
+
           total: questions.length,
+
           validCount:
             validation.questions.length,
+
           mappedCount:
             preparedQuestions.length,
+
           errorCount:
             mappingErrors.length,
+
+          /*
+           * Send available values to the editor.
+           */
+
+          exams: getExamSuggestions(exams),
+
+          subjectsByExam: Object.fromEntries(
+            exams.map((exam) => [
+              String(exam._id),
+              getSubjectSuggestions(exam),
+            ])
+          ),
         },
         { status: 400 }
       );
@@ -394,27 +652,22 @@ export async function POST(request: Request): Promise<Response> {
      * -----------------------------------------
      * FIND EXISTING QUESTIONS
      * -----------------------------------------
-     *
-     * Duplicate detection now uses:
-     *
-     * examId + question
-     *
-     * instead of:
-     *
-     * exam + question
      */
 
     const duplicateConditions =
-      preparedQuestions.map((item) => ({
-        examId: item.examId,
-        question: item.question,
-      }));
+      preparedQuestions.map(
+        (item) => ({
+          examId: item.examId,
+          question: item.question,
+        })
+      );
 
     const existing =
       duplicateConditions.length > 0
         ? await Question.find(
             {
-              $or: duplicateConditions,
+              $or:
+                duplicateConditions,
             },
             {
               examId: 1,
@@ -425,20 +678,21 @@ export async function POST(request: Request): Promise<Response> {
 
     /*
      * -----------------------------------------
-     * CREATE EXISTING KEY SET
+     * EXISTING KEY SET
      * -----------------------------------------
      */
 
-    const existingKeys = new Set(
-      existing.map(
-        (item) =>
-          `${String(
-            item.examId
-          )}::${normalizeText(
-            item.question
-          )}`
-      )
-    );
+    const existingKeys =
+      new Set(
+        existing.map(
+          (item) =>
+            `${String(
+              item.examId
+            )}::${normalizeText(
+              item.question
+            )}`
+        )
+      );
 
     /*
      * -----------------------------------------
@@ -447,16 +701,20 @@ export async function POST(request: Request): Promise<Response> {
      */
 
     const newQuestions =
-      preparedQuestions.filter((item) => {
-        const key =
-          `${String(
-            item.examId
-          )}::${normalizeText(
-            item.question
-          )}`;
+      preparedQuestions.filter(
+        (item) => {
+          const key =
+            `${String(
+              item.examId
+            )}::${normalizeText(
+              item.question
+            )}`;
 
-        return !existingKeys.has(key);
-      });
+          return !existingKeys.has(
+            key
+          );
+        }
+      );
 
     /*
      * -----------------------------------------
@@ -475,7 +733,8 @@ export async function POST(request: Request): Promise<Response> {
           }
         );
 
-      insertedCount = inserted.length;
+      insertedCount =
+        inserted.length;
     }
 
     /*
@@ -485,7 +744,18 @@ export async function POST(request: Request): Promise<Response> {
      */
 
     const skippedCount =
-      questions.length - insertedCount;
+      questions.length -
+      insertedCount;
+
+    const duplicateCount =
+      preparedQuestions.length -
+      insertedCount;
+
+    /*
+     * -----------------------------------------
+     * SUCCESS
+     * -----------------------------------------
+     */
 
     return NextResponse.json({
       success: true,
@@ -499,9 +769,7 @@ export async function POST(request: Request): Promise<Response> {
 
       skippedCount,
 
-      duplicateCount:
-        preparedQuestions.length -
-        insertedCount,
+      duplicateCount,
 
       mappedCount:
         preparedQuestions.length,
