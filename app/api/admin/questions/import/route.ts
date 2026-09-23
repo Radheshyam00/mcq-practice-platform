@@ -34,10 +34,24 @@ type ExamDocument = {
   subjects?: ExamSubject[];
 };
 
+type AdminCheck =
+  | {
+      authorized: true;
+    }
+  | {
+      authorized: false;
+      response: NextResponse;
+    };
+
 /**
  * Check whether the current user is an admin.
+ *
+ * IMPORTANT:
+ * The success branch does not contain response: null.
+ * This prevents Next.js route-handler return-type inference
+ * from allowing null to escape from POST().
  */
-async function checkAdmin() {
+async function checkAdmin(): Promise<AdminCheck> {
   const session = await getServerSession(authOptions);
 
   if (!session?.user) {
@@ -68,7 +82,6 @@ async function checkAdmin() {
 
   return {
     authorized: true,
-    response: null,
   };
 }
 
@@ -115,8 +128,7 @@ function findExam(
   }
 
   const byId = exams.find(
-    (exam) =>
-      exam._id.toString() === value
+    (exam) => exam._id.toString() === value
   );
 
   if (byId) {
@@ -124,8 +136,7 @@ function findExam(
   }
 
   const bySlug = exams.find(
-    (exam) =>
-      normalizeText(exam.slug) === normalized
+    (exam) => normalizeText(exam.slug) === normalized
   );
 
   if (bySlug) {
@@ -133,8 +144,7 @@ function findExam(
   }
 
   const byName = exams.find(
-    (exam) =>
-      normalizeText(exam.name) === normalized
+    (exam) => normalizeText(exam.name) === normalized
   );
 
   return byName ?? null;
@@ -161,8 +171,7 @@ function findSubject(
   }
 
   const byId = subjects.find(
-    (subject) =>
-      subject._id.toString() === value
+    (subject) => subject._id.toString() === value
   );
 
   if (byId) {
@@ -170,8 +179,7 @@ function findSubject(
   }
 
   const bySlug = subjects.find(
-    (subject) =>
-      normalizeText(subject.slug) === normalized
+    (subject) => normalizeText(subject.slug) === normalized
   );
 
   if (bySlug) {
@@ -179,8 +187,7 @@ function findSubject(
   }
 
   const byName = subjects.find(
-    (subject) =>
-      normalizeText(subject.name) === normalized
+    (subject) => normalizeText(subject.name) === normalized
   );
 
   return byName ?? null;
@@ -194,9 +201,7 @@ function buildQuestionDocument(
   exam: ExamDocument,
   subject: ExamSubject
 ) {
-  const parsedCorrectAnswer = Number(
-    item.correctAnswer
-  );
+  const parsedCorrectAnswer = Number(item.correctAnswer);
 
   return {
     question: item.question.trim(),
@@ -217,7 +222,7 @@ function buildQuestionDocument(
 
     explanation: item.explanation.trim(),
 
-    // New MongoDB relationships.
+    // MongoDB relationships.
     examId: exam._id,
     subjectId: subject._id,
 
@@ -241,9 +246,7 @@ function buildQuestionDocument(
  * action = validate
  * action = import
  */
-export async function POST(
-  request: NextRequest
-) {
+export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
     const adminCheck = await checkAdmin();
 
@@ -315,10 +318,6 @@ export async function POST(
 
     /**
      * Validation-only request.
-     *
-     * Important:
-     * The frontend preview gets canonical correctAnswer values
-     * as 0, 1, 2, or 3.
      */
     if (action === "validate") {
       return NextResponse.json({
@@ -354,9 +353,6 @@ export async function POST(
 
     /**
      * Load exams once.
-     *
-     * We need subjects embedded inside each exam because
-     * Question.subjectId must belong to Question.examId.
      */
     const exams = (await Exam.find({})
       .select("_id name slug subjects")
@@ -377,12 +373,20 @@ export async function POST(
       typeof buildQuestionDocument
     >[] = [];
 
-    const mappingErrors = [];
+    const mappingErrors: {
+      row: number;
+      field: string;
+      message: string;
+    }[] = [];
 
     /**
      * Resolve exam + subject for every validated question.
      */
-    for (let index = 0; index < validation.questions.length; index++) {
+    for (
+      let index = 0;
+      index < validation.questions.length;
+      index++
+    ) {
       const item = validation.questions[index];
 
       const exam = findExam(
@@ -470,9 +474,12 @@ export async function POST(
     /**
      * Final defensive validation of every document.
      */
-    for (let index = 0; index < preparedDocuments.length; index++) {
-      const document =
-        preparedDocuments[index];
+    for (
+      let index = 0;
+      index < preparedDocuments.length;
+      index++
+    ) {
+      const document = preparedDocuments[index];
 
       if (
         !document.examId ||
@@ -539,11 +546,7 @@ export async function POST(
     }
 
     /**
-     * Avoid inserting duplicate questions that already exist
-     * in MongoDB.
-     *
-     * Duplicate identity:
-     * same exam + normalized question text.
+     * Avoid inserting duplicate questions.
      */
     const duplicateKeys = new Set<string>();
 
@@ -615,7 +618,8 @@ export async function POST(
     return NextResponse.json({
       success: true,
       action: "import",
-      message: `${inserted.length} question(s) imported successfully.`,
+      message:
+        `${inserted.length} question(s) imported successfully.`,
       imported: inserted.length,
       skipped:
         preparedDocuments.length -

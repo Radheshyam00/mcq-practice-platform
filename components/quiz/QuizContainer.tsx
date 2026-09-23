@@ -67,7 +67,7 @@ function formatTime(seconds: number): string {
   ).padStart(2, "0")}`;
 }
 
-export default function QuizContainer({
+export function QuizContainer({
   questions,
   mode = "practice",
   examSlug,
