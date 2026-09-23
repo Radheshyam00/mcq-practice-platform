@@ -1,7 +1,6 @@
-
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useSession } from "next-auth/react";
 import {
@@ -19,46 +18,21 @@ import {
   Lock,
   AlertCircle,
   Loader2,
-  BookOpen,
-  Trophy,
-  Target,
+  Phone,
   FileText,
 } from "lucide-react";
 
 type ProfileForm = {
-  id: string;
   name: string;
   email: string;
   role: string;
   status: string;
+  phone: string;
+  bio: string;
   image: string;
-  permissions: string[];
-  createdAt: string | null;
 };
 
-type LearningStats = {
-  questionsPracticed: number;
-  mockTestsCompleted: number;
-  averageAccuracy: number;
-  bestScore: number;
-};
-
-type ApiResponse = {
-  success?: boolean;
-  message?: string;
-  user?: {
-    id?: string;
-    name?: string;
-    email?: string;
-    role?: string;
-    status?: string;
-    image?: string;
-    permissions?: string[];
-    createdAt?: string | null;
-  };
-};
-
-export default function ProfilePage() {
+export default function AdminProfilePage() {
   const { data: session, status: sessionStatus } = useSession();
 
   const [editing, setEditing] = useState(false);
@@ -68,138 +42,82 @@ export default function ProfilePage() {
   const [error, setError] = useState("");
 
   const [form, setForm] = useState<ProfileForm>({
-    id: "",
     name: "",
     email: "",
-    role: "student",
+    role: "user",
     status: "active",
+    phone: "",
+    bio: "",
     image: "",
-    permissions: [],
-    createdAt: null,
   });
 
   /*
-   * These are kept as UI statistics until your result/attempt
-   * collection is connected to this profile page.
-   */
-  const [stats] = useState<LearningStats>({
-    questionsPracticed: 128,
-    mockTestsCompleted: 12,
-    averageAccuracy: 78,
-    bestScore: 94,
-  });
-
-  /*
-   * Safely parse API responses.
-   *
-   * This prevents:
-   * Unexpected token '<', "<!DOCTYPE..."
-   *
-   * when Next.js returns an HTML error page instead of JSON.
-   */
-  const parseApiResponse = async (
-    response: Response
-  ): Promise<ApiResponse> => {
-    const contentType =
-      response.headers.get("content-type") || "";
-
-    if (!contentType.includes("application/json")) {
-      const text = await response.text();
-
-      console.error(
-        "Profile API returned non-JSON response:",
-        text.slice(0, 1000)
-      );
-
-      throw new Error(
-        `Profile API returned an unexpected response (${response.status}).`
-      );
-    }
-
-    return response.json();
-  };
-
-  /*
-   * Apply API user data to the form.
-   */
-  const applyUser = (
-    user: NonNullable<ApiResponse["user"]>
-  ) => {
-    setForm({
-      id: user.id || "",
-      name: user.name || "",
-      email: user.email || "",
-      role: user.role || "student",
-      status: user.status || "active",
-      image: user.image || "",
-      permissions: Array.isArray(user.permissions)
-        ? user.permissions
-        : [],
-      createdAt: user.createdAt || null,
-    });
-  };
-
-  /*
-   * Load profile.
-   */
-  const loadProfile = useCallback(async () => {
-    try {
-      setLoadingProfile(true);
-      setError("");
-
-      const response = await fetch("/api/profile", {
-        method: "GET",
-        cache: "no-store",
-        headers: {
-          Accept: "application/json",
-        },
-      });
-
-      const data = await parseApiResponse(response);
-
-      if (!response.ok || !data.success || !data.user) {
-        throw new Error(
-          data.message || "Failed to load profile."
-        );
-      }
-
-      applyUser(data.user);
-    } catch (error) {
-      console.error("Profile loading error:", error);
-
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Failed to load profile."
-      );
-    } finally {
-      setLoadingProfile(false);
-    }
-  }, []);
-
-  /*
-   * Load profile after authentication.
+   * Load profile from MongoDB
    */
   useEffect(() => {
-    if (sessionStatus === "authenticated") {
-      loadProfile();
+    if (sessionStatus !== "authenticated") {
+      if (sessionStatus === "unauthenticated") {
+        setLoadingProfile(false);
+      }
+
+      return;
     }
 
-    if (sessionStatus === "unauthenticated") {
-      setLoadingProfile(false);
-    }
-  }, [sessionStatus, loadProfile]);
+    const loadProfile = async () => {
+      try {
+        setLoadingProfile(true);
+        setError("");
+
+        const response = await fetch("/api/admin/profile", {
+          method: "GET",
+          cache: "no-store",
+        });
+
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+          throw new Error(
+            data.message || "Failed to load profile"
+          );
+        }
+
+        setForm({
+          name: data.user.name || "",
+          email: data.user.email || "",
+          role: data.user.role || "user",
+          status: data.user.status || "active",
+          phone: data.user.phone || "",
+          bio: data.user.bio || "",
+          image: data.user.image || "",
+        });
+      } catch (error) {
+        console.error("Profile loading error:", error);
+
+        setError(
+          error instanceof Error
+            ? error.message
+            : "Failed to load profile"
+        );
+      } finally {
+        setLoadingProfile(false);
+      }
+    };
+
+    loadProfile();
+  }, [sessionStatus]);
 
   /*
-   * Handle form changes.
+   * Handle form changes
    */
   const handleChange = (
-    e: React.ChangeEvent<HTMLInputElement>
+    e: React.ChangeEvent<
+      HTMLInputElement | HTMLTextAreaElement
+    >
   ) => {
     const { name, value } = e.target;
 
-    setForm((previous) => ({
-      ...previous,
+    setForm((prev) => ({
+      ...prev,
       [name]: value,
     }));
 
@@ -213,21 +131,11 @@ export default function ProfilePage() {
   };
 
   /*
-   * Save profile.
+   * Save profile
    */
   const handleSave = async () => {
-    const trimmedName = form.name.trim();
-    const trimmedImage = form.image.trim();
-
-    if (!trimmedName) {
+    if (!form.name.trim()) {
       setError("Name is required.");
-      return;
-    }
-
-    if (trimmedName.length < 2) {
-      setError(
-        "Name must contain at least 2 characters."
-      );
       return;
     }
 
@@ -236,32 +144,42 @@ export default function ProfilePage() {
     setError("");
 
     try {
-      const response = await fetch("/api/profile", {
+      const response = await fetch("/api/admin/profile", {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
-          Accept: "application/json",
         },
         body: JSON.stringify({
-          name: trimmedName,
-          image: trimmedImage,
+          name: form.name.trim(),
+          phone: form.phone.trim(),
+          bio: form.bio.trim(),
+          image: form.image.trim(),
         }),
       });
 
-      const data = await parseApiResponse(response);
+      const data = await response.json();
 
-      if (!response.ok || !data.success || !data.user) {
+      if (!response.ok || !data.success) {
         throw new Error(
-          data.message || "Failed to update profile."
+          data.message || "Failed to update profile"
         );
       }
 
-      applyUser(data.user);
+      setForm((prev) => ({
+        ...prev,
+        name: data.user.name || "",
+        email: data.user.email || "",
+        role: data.user.role || "user",
+        status: data.user.status || "active",
+        phone: data.user.phone || "",
+        bio: data.user.bio || "",
+        image: data.user.image || "",
+      }));
 
-      setEditing(false);
       setSaved(true);
+      setEditing(false);
 
-      window.setTimeout(() => {
+      setTimeout(() => {
         setSaved(false);
       }, 3000);
     } catch (error) {
@@ -270,7 +188,7 @@ export default function ProfilePage() {
       setError(
         error instanceof Error
           ? error.message
-          : "Failed to update profile."
+          : "Failed to update profile"
       );
     } finally {
       setSaving(false);
@@ -278,36 +196,76 @@ export default function ProfilePage() {
   };
 
   /*
-   * Cancel editing.
+   * Cancel editing
    */
-  const handleCancel = async () => {
-    if (saving) {
-      return;
-    }
-
+  const handleCancel = () => {
     setEditing(false);
-    setSaved(false);
     setError("");
 
-    await loadProfile();
+    /*
+     * Reload the database version so unsaved
+     * changes are discarded.
+     */
+    if (sessionStatus === "authenticated") {
+      loadProfileAgain();
+    }
   };
 
   /*
-   * Loading state.
+   * Reload profile helper
    */
-  if (
-    sessionStatus === "loading" ||
-    loadingProfile
-  ) {
+  const loadProfileAgain = async () => {
+    try {
+      setLoadingProfile(true);
+      setError("");
+
+      const response = await fetch("/api/admin/profile", {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      const data = await response.json();
+
+      if (!response.ok || !data.success) {
+        throw new Error(
+          data.message || "Failed to load profile"
+        );
+      }
+
+      setForm({
+        name: data.user.name || "",
+        email: data.user.email || "",
+        role: data.user.role || "user",
+        status: data.user.status || "active",
+        phone: data.user.phone || "",
+        bio: data.user.bio || "",
+        image: data.user.image || "",
+      });
+    } catch (error) {
+      console.error("Profile reload error:", error);
+
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Failed to reload profile"
+      );
+    } finally {
+      setLoadingProfile(false);
+    }
+  };
+
+  /*
+   * Session loading
+   */
+  if (sessionStatus === "loading" || loadingProfile) {
     return (
       <main className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-white">
-        <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
+        <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6 lg:px-8">
           <div className="mb-8 flex items-center gap-4">
             <div className="h-10 w-10 animate-pulse rounded-xl bg-slate-200 dark:bg-slate-800" />
 
             <div className="space-y-2">
               <div className="h-6 w-40 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
-
               <div className="h-4 w-64 animate-pulse rounded-lg bg-slate-200 dark:bg-slate-800" />
             </div>
           </div>
@@ -317,7 +275,6 @@ export default function ProfilePage() {
 
             <div className="space-y-6">
               <div className="h-[500px] animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
-
               <div className="h-40 animate-pulse rounded-2xl bg-slate-200 dark:bg-slate-800" />
             </div>
           </div>
@@ -327,7 +284,7 @@ export default function ProfilePage() {
   }
 
   /*
-   * Not authenticated.
+   * Not authenticated
    */
   if (sessionStatus === "unauthenticated") {
     return (
@@ -342,14 +299,14 @@ export default function ProfilePage() {
           </h1>
 
           <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
-            Please sign in to access your profile.
+            Please sign in to access your administrator profile.
           </p>
 
           <Link
-            href="/login"
+            href="/admin/login"
             className="mt-6 inline-flex items-center justify-center rounded-xl bg-indigo-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-indigo-700"
           >
-            Go to Login
+            Go to Admin Login
           </Link>
         </div>
       </main>
@@ -357,40 +314,22 @@ export default function ProfilePage() {
   }
 
   const displayName =
-    form.name ||
-    session?.user?.name ||
-    "Student";
+    form.name || session?.user?.name || "Administrator";
 
   const avatarLetter =
-    displayName.charAt(0).toUpperCase() || "U";
+    displayName.charAt(0).toUpperCase() || "A";
 
   const isActive = form.status === "active";
 
-  const roleName = form.role
-    .replaceAll("-", " ")
-    .replace(/\b\w/g, (character) =>
-      character.toUpperCase()
-    );
-
-  const memberSince = form.createdAt
-    ? new Date(form.createdAt).toLocaleDateString(
-        "en-US",
-        {
-          month: "long",
-          year: "numeric",
-        }
-      )
-    : "Not available";
-
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-white">
-      <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
-        {/* Page Header */}
-        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      {/* Header */}
+      <header className="border-b border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-4">
             <Link
-              href="/dashboard"
-              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800"
+              href="/admin/dashboard"
+              className="flex h-10 w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-600 transition hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
               aria-label="Back to dashboard"
             >
               <ArrowLeft size={19} />
@@ -402,7 +341,7 @@ export default function ProfilePage() {
               </h1>
 
               <p className="text-sm text-slate-500 dark:text-slate-400">
-                Manage your account and learning profile
+                Manage your administrator account
               </p>
             </div>
           </div>
@@ -415,7 +354,7 @@ export default function ProfilePage() {
                 setSaved(false);
                 setEditing(true);
               }}
-              className="inline-flex items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700"
+              className="inline-flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700"
             >
               <Edit3 size={16} />
               Edit Profile
@@ -425,14 +364,16 @@ export default function ProfilePage() {
               type="button"
               onClick={handleCancel}
               disabled={saving}
-              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               <X size={16} />
               Cancel
             </button>
           )}
         </div>
+      </header>
 
+      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
         {/* Error */}
         {error && (
           <div className="mb-6 flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-400">
@@ -446,7 +387,9 @@ export default function ProfilePage() {
                 Something went wrong
               </p>
 
-              <p className="mt-0.5">{error}</p>
+              <p className="mt-0.5">
+                {error}
+              </p>
             </div>
           </div>
         )}
@@ -462,10 +405,9 @@ export default function ProfilePage() {
           </div>
         )}
 
-        {/* Main Layout */}
         <div className="grid gap-6 lg:grid-cols-[320px_1fr]">
           {/* Profile Card */}
-          <section className="h-fit rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <div className="flex flex-col items-center text-center">
               {/* Avatar */}
               <div className="relative">
@@ -474,10 +416,6 @@ export default function ProfilePage() {
                     src={form.image}
                     alt={displayName}
                     className="h-28 w-28 rounded-full object-cover shadow-lg shadow-indigo-500/20"
-                    onError={(event) => {
-                      event.currentTarget.style.display =
-                        "none";
-                    }}
                   />
                 ) : (
                   <div className="flex h-28 w-28 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 text-4xl font-bold text-white shadow-lg shadow-indigo-500/20">
@@ -485,9 +423,14 @@ export default function ProfilePage() {
                   </div>
                 )}
 
-                <div className="absolute bottom-1 right-1 flex h-9 w-9 items-center justify-center rounded-full border-4 border-white bg-indigo-600 text-white shadow-md dark:border-slate-900">
+                <button
+                  type="button"
+                  disabled
+                  title="Profile image upload can be connected later"
+                  className="absolute bottom-1 right-1 flex h-9 w-9 cursor-not-allowed items-center justify-center rounded-full border-4 border-white bg-indigo-600 text-white opacity-90 shadow-md dark:border-slate-900"
+                >
                   <Camera size={15} />
-                </div>
+                </button>
               </div>
 
               <h2 className="mt-5 text-xl font-bold">
@@ -495,39 +438,82 @@ export default function ProfilePage() {
               </h2>
 
               <p className="mt-1 max-w-full truncate text-sm text-slate-500 dark:text-slate-400">
-                {form.email || "Student Account"}
+                {form.email || "Administrator"}
               </p>
 
               <div className="mt-4 inline-flex items-center gap-2 rounded-full bg-indigo-50 px-3 py-1.5 text-xs font-semibold capitalize text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-400">
                 <Shield size={13} />
-                {roleName}
+                {form.role.replaceAll("-", " ")}
               </div>
             </div>
 
             <div className="my-6 border-t border-slate-200 dark:border-slate-800" />
 
             <div className="space-y-4">
-              <ProfileItem
-                icon={<Mail size={16} />}
-                label="Email"
-                value={form.email || "Not available"}
-              />
-
-              <ProfileItem
-                icon={<User size={16} />}
-                label="Account Type"
-                value="Student"
-              />
-
-              <ProfileItem
-                icon={<Shield size={16} />}
-                label="Account Role"
-                value={roleName}
-              />
-
+              {/* Email */}
               <div className="flex items-center gap-3">
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800">
-                  <Check
+                  <Mail
+                    size={16}
+                    className="text-slate-500 dark:text-slate-400"
+                  />
+                </div>
+
+                <div className="min-w-0">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Email
+                  </p>
+
+                  <p className="truncate text-sm font-medium">
+                    {form.email || "Not available"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Phone */}
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800">
+                  <Phone
+                    size={16}
+                    className="text-slate-500 dark:text-slate-400"
+                  />
+                </div>
+
+                <div className="min-w-0">
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Phone
+                  </p>
+
+                  <p className="truncate text-sm font-medium">
+                    {form.phone || "Not provided"}
+                  </p>
+                </div>
+              </div>
+
+              {/* Role */}
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800">
+                  <Shield
+                    size={16}
+                    className="text-slate-500 dark:text-slate-400"
+                  />
+                </div>
+
+                <div>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Account Role
+                  </p>
+
+                  <p className="text-sm font-medium capitalize">
+                    {form.role.replaceAll("-", " ")}
+                  </p>
+                </div>
+              </div>
+
+              {/* Status */}
+              <div className="flex items-center gap-3">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 dark:bg-slate-800">
+                  <CalendarDays
                     size={16}
                     className="text-slate-500 dark:text-slate-400"
                   />
@@ -549,16 +535,10 @@ export default function ProfilePage() {
                   </p>
                 </div>
               </div>
-
-              <ProfileItem
-                icon={<CalendarDays size={16} />}
-                label="Member Since"
-                value={memberSince}
-              />
             </div>
           </section>
 
-          {/* Right Content */}
+          {/* Main */}
           <div className="space-y-6">
             {/* Personal Information */}
             <section className="rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -613,6 +593,7 @@ export default function ProfilePage() {
 
                   <input
                     id="email"
+                    name="email"
                     type="email"
                     value={form.email}
                     disabled
@@ -624,31 +605,77 @@ export default function ProfilePage() {
                   </p>
                 </div>
 
-                {/* Profile Image */}
+                {/* Phone */}
                 <div>
                   <label
-                    htmlFor="image"
+                    htmlFor="phone"
                     className="mb-2 block text-sm font-medium"
                   >
-                    Profile Image URL
+                    Phone Number
                   </label>
 
                   <input
-                    id="image"
-                    name="image"
-                    type="url"
-                    value={form.image}
+                    id="phone"
+                    name="phone"
+                    type="tel"
+                    value={form.phone}
                     onChange={handleChange}
                     disabled={!editing || saving}
-                    placeholder="https://example.com/profile.jpg"
-                    maxLength={2000}
+                    placeholder="Enter phone number"
+                    maxLength={30}
                     className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:placeholder:text-slate-600 dark:focus:border-indigo-500 dark:disabled:bg-slate-950/50 dark:disabled:text-slate-500"
                   />
+                </div>
 
-                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                    Use a publicly accessible HTTPS image URL.
+                {/* Bio */}
+                <div>
+                  <label
+                    htmlFor="bio"
+                    className="mb-2 block text-sm font-medium"
+                  >
+                    Bio
+                  </label>
+
+                  <textarea
+                    id="bio"
+                    name="bio"
+                    rows={4}
+                    value={form.bio}
+                    onChange={handleChange}
+                    disabled={!editing || saving}
+                    placeholder="Write something about yourself..."
+                    maxLength={500}
+                    className="w-full resize-none rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 disabled:cursor-not-allowed disabled:bg-slate-50 disabled:text-slate-500 dark:border-slate-700 dark:bg-slate-950 dark:placeholder:text-slate-600 dark:focus:border-indigo-500 dark:disabled:bg-slate-950/50 dark:disabled:text-slate-500"
+                  />
+
+                  <p className="mt-1 text-right text-xs text-slate-400">
+                    {form.bio.length}/500
                   </p>
                 </div>
+
+                {/* Image URL */}
+                {editing && (
+                  <div>
+                    <label
+                      htmlFor="image"
+                      className="mb-2 block text-sm font-medium"
+                    >
+                      Profile Image URL
+                    </label>
+
+                    <input
+                      id="image"
+                      name="image"
+                      type="url"
+                      value={form.image}
+                      onChange={handleChange}
+                      disabled={saving}
+                      placeholder="https://example.com/profile.jpg"
+                      maxLength={2000}
+                      className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm outline-none transition placeholder:text-slate-400 focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/10 disabled:cursor-not-allowed disabled:bg-slate-50 dark:border-slate-700 dark:bg-slate-950 dark:placeholder:text-slate-600 dark:focus:border-indigo-500"
+                    />
+                  </div>
+                )}
 
                 {/* Save */}
                 {editing && (
@@ -676,51 +703,6 @@ export default function ProfilePage() {
                     </button>
                   </div>
                 )}
-              </div>
-            </section>
-
-            {/* Learning Statistics */}
-            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-              <div className="flex items-center gap-3">
-                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400">
-                  <Trophy size={19} />
-                </div>
-
-                <div>
-                  <h2 className="font-semibold">
-                    Learning Statistics
-                  </h2>
-
-                  <p className="text-sm text-slate-500 dark:text-slate-400">
-                    Your preparation overview
-                  </p>
-                </div>
-              </div>
-
-              <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                <LearningStat
-                  icon={<BookOpen size={17} />}
-                  label="Questions Practiced"
-                  value={stats.questionsPracticed.toString()}
-                />
-
-                <LearningStat
-                  icon={<Trophy size={17} />}
-                  label="Mock Tests Completed"
-                  value={stats.mockTestsCompleted.toString()}
-                />
-
-                <LearningStat
-                  icon={<Target size={17} />}
-                  label="Average Accuracy"
-                  value={`${stats.averageAccuracy}%`}
-                />
-
-                <LearningStat
-                  icon={<Check size={17} />}
-                  label="Best Score"
-                  value={`${stats.bestScore}%`}
-                />
               </div>
             </section>
 
@@ -760,13 +742,13 @@ export default function ProfilePage() {
                       </p>
 
                       <p className="text-xs text-slate-500 dark:text-slate-400">
-                        Keep your account password secure
+                        Change your administrator password
                       </p>
                     </div>
                   </div>
 
                   <Link
-                    href="/forgot-password"
+                    href="/admin/forgot-password"
                     className="inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                   >
                     Change Password
@@ -775,10 +757,55 @@ export default function ProfilePage() {
               </div>
             </section>
 
-            {/* Account Information */}
+            {/* Permissions */}
             <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
               <div className="flex items-start gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400">
+                  <Shield size={18} />
+                </div>
+
+                <div>
+                  <h2 className="font-semibold">
+                    Administrator Access
+                  </h2>
+
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                    Your account permissions determine which
+                    administrator features you can access.
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {[
+                  "Dashboard",
+                  "Questions",
+                  "Exams",
+                  "Mock Tests",
+                  "Users",
+                  "Results",
+                ].map((permission) => (
+                  <div
+                    key={permission}
+                    className="flex items-center gap-2 rounded-xl border border-slate-200 px-4 py-3 text-sm dark:border-slate-800"
+                  >
+                    <div className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-900/40 dark:text-emerald-400">
+                      <Check
+                        size={12}
+                        strokeWidth={3}
+                      />
+                    </div>
+
+                    <span>{permission}</span>
+                  </div>
+                ))}
+              </div>
+            </section>
+
+            {/* Account information */}
+            <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">
                   <FileText size={18} />
                 </div>
 
@@ -787,9 +814,9 @@ export default function ProfilePage() {
                     Account Information
                   </h2>
 
-                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                    Your account role, permissions and status are
-                    managed by the MCQ Practice system.
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                    Your account email, role and status are managed
+                    by the administrator system.
                   </p>
                 </div>
               </div>
@@ -801,8 +828,8 @@ export default function ProfilePage() {
                       Account Type
                     </p>
 
-                    <p className="mt-1 text-sm font-semibold">
-                      Student
+                    <p className="mt-1 text-sm font-semibold capitalize">
+                      {form.role.replaceAll("-", " ")}
                     </p>
                   </div>
 
@@ -824,40 +851,15 @@ export default function ProfilePage() {
 
                   <div>
                     <p className="text-xs text-slate-500 dark:text-slate-400">
-                      Role
+                      Email
                     </p>
 
                     <p className="mt-1 truncate text-sm font-semibold">
-                      {roleName}
+                      {form.email || "Not available"}
                     </p>
                   </div>
                 </div>
               </div>
-
-              {/* Permissions */}
-              {form.permissions.length > 0 && (
-                <div className="mt-5">
-                  <p className="mb-3 text-xs font-semibold text-slate-500 dark:text-slate-400">
-                    Permissions
-                  </p>
-
-                  <div className="flex flex-wrap gap-2">
-                    {form.permissions.map((permission) => (
-                      <span
-                        key={permission}
-                        className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-medium text-slate-700 dark:bg-slate-800 dark:text-slate-300"
-                      >
-                        <Check
-                          size={12}
-                          className="text-emerald-500"
-                        />
-
-                        {permission}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
             </section>
           </div>
         </div>
@@ -865,66 +867,3 @@ export default function ProfilePage() {
     </main>
   );
 }
-
-/*
- * Profile information item
- */
-function ProfileItem({
-  icon,
-  label,
-  value,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="flex items-center gap-3">
-      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">
-        {icon}
-      </div>
-
-      <div className="min-w-0">
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          {label}
-        </p>
-
-        <p className="truncate text-sm font-medium">
-          {value}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-/*
- * Learning statistics item
- */
-function LearningStat({
-  icon,
-  label,
-  value,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-}) {
-  return (
-    <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950">
-      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-white text-slate-500 shadow-sm dark:bg-slate-900 dark:text-slate-400">
-        {icon}
-      </div>
-
-      <div className="min-w-0 flex-1">
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          {label}
-        </p>
-
-        <p className="mt-1 text-lg font-black">
-          {value}
-        </p>
-      </div>
-    </div>
-  );
-}
-

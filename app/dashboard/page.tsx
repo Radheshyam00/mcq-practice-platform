@@ -138,7 +138,10 @@ export default function DashboardPage() {
 
       <section className="mx-auto max-w-7xl px-4 py-10 sm:px-6 lg:px-8">
         {/* Welcome */}
-        <div className="rounded-3xl bg-slate-900 p-7 text-white shadow-xl dark:bg-slate-900 sm:p-10">
+        <Link
+          href="/profile"
+          className="block rounded-3xl bg-slate-900 p-7 text-white shadow-xl transition hover:-translate-y-0.5 hover:shadow-2xl dark:bg-slate-900 sm:p-10"
+        >
           <div className="flex flex-col justify-between gap-6 md:flex-row md:items-center">
             <div>
               <p className="mb-2 text-sm font-medium text-slate-300">
@@ -153,13 +156,17 @@ export default function DashboardPage() {
                 Continue practicing multiple-choice questions,
                 track your progress and prepare for your exams.
               </p>
+
+              <p className="mt-4 text-sm font-semibold text-white/80">
+                View your profile →
+              </p>
             </div>
 
             <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-2xl bg-white/10">
               <User size={30} />
             </div>
           </div>
-        </div>
+        </Link>
 
         {/* Stats */}
         <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-4">

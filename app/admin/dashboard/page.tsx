@@ -12,6 +12,7 @@ import {
   LogOut,
   Settings,
   ShieldCheck,
+  User,
   UserCheck,
   Users,
   ClipboardList,
@@ -103,7 +104,11 @@ export default function AdminDashboardPage() {
                 label="Dashboard"
                 active
               />
-
+              <AdminNav
+                href="/admin/profile"
+                icon={<User size={18} />}
+                label="Profile"
+              />
               <AdminNav
                 href="/admin/users"
                 icon={<Users size={18} />}
@@ -180,6 +185,13 @@ export default function AdminDashboardPage() {
                   <Upload className="h-4 w-4" />
                   Import Questions
                 </Link>
+                <Link
+                  href="/admin/profile"
+                  className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm hover:bg-slate-100 dark:hover:bg-slate-800"
+                >
+                  <User size={16} />
+                  Profile
+                </Link>
               </div>
             </div>
 
@@ -212,6 +224,12 @@ export default function AdminDashboardPage() {
 
             {/* Management */}
             <div className="mt-6 grid gap-6 md:grid-cols-2">
+              <AdminPanel
+                href="/admin/profile"
+                title="Profile"
+                description="Manage your profile information and settings."
+                icon={<User size={22} />}
+              />
               <AdminPanel
                 href="/admin/questions"
                 title="Question Bank"
