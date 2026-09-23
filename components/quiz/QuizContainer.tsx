@@ -16,11 +16,36 @@ import { useQuiz } from "@/hooks/useQuiz";
 
 type QuizContainerProps = {
   questions: Question[];
+
   mode?: "practice" | "mock-test" | "daily";
+
   examSlug?: string;
   subjectSlug?: string;
   title?: string;
+
+  /**
+   * Duration supplied by quiz pages in minutes.
+   * Example: durationMinutes={30}
+   */
+  durationMinutes?: number;
+
+  /**
+   * Backwards-compatible timer value in seconds.
+   * durationMinutes takes priority when provided.
+   */
   timeLimit?: number;
+
+  /**
+   * Optional exam information supplied by
+   * practice/mock-test/daily quiz pages.
+   */
+  examId?: string;
+  examName?: string;
+
+  /**
+   * Optional result type supplied by quiz pages.
+   */
+  resultType?: string;
 };
 
 function getQuestionId(question: Question): string {
@@ -73,7 +98,11 @@ export function QuizContainer({
   examSlug,
   subjectSlug,
   title = "Quiz",
+  durationMinutes,
   timeLimit,
+  examId,
+  examName,
+  resultType,
 }: QuizContainerProps) {
   const router = useRouter();
 
@@ -85,6 +114,34 @@ export function QuizContainer({
     [questions]
   );
 
+  /**
+   * Normalize timer to seconds.
+   *
+   * durationMinutes is the preferred value.
+   * timeLimit remains supported for older callers.
+   */
+  const effectiveTimeLimit = useMemo(() => {
+    if (
+      typeof durationMinutes === "number" &&
+      Number.isFinite(durationMinutes) &&
+      durationMinutes > 0
+    ) {
+      return Math.floor(
+        durationMinutes * 60
+      );
+    }
+
+    if (
+      typeof timeLimit === "number" &&
+      Number.isFinite(timeLimit) &&
+      timeLimit > 0
+    ) {
+      return Math.floor(timeLimit);
+    }
+
+    return 0;
+  }, [durationMinutes, timeLimit]);
+
   const quiz = useQuiz(validQuestions);
 
   const {
@@ -93,7 +150,6 @@ export function QuizContainer({
     answers,
     marked,
     submitted,
-    result,
     choose,
     toggleMark,
     next,
@@ -103,9 +159,7 @@ export function QuizContainer({
   } = quiz;
 
   const [timeLeft, setTimeLeft] = useState(
-    typeof timeLimit === "number"
-      ? Math.max(0, timeLimit)
-      : 0
+    effectiveTimeLimit
   );
 
   const [hasSubmittedResult, setHasSubmittedResult] =
@@ -118,35 +172,27 @@ export function QuizContainer({
     useState("");
 
   /**
-   * Reset timer when the question set or time
-   * limit changes.
+   * Reset timer when the question set
+   * or duration changes.
    */
   useEffect(() => {
-    if (
-      typeof timeLimit === "number" &&
-      Number.isFinite(timeLimit)
-    ) {
-      setTimeLeft(
-        Math.max(0, Math.floor(timeLimit))
-      );
-    } else {
-      setTimeLeft(0);
-    }
-  }, [timeLimit, validQuestions.length]);
+    setTimeLeft(effectiveTimeLimit);
+  }, [
+    effectiveTimeLimit,
+    validQuestions.length,
+  ]);
 
   /**
    * Countdown timer.
    *
-   * Timer is only active when:
+   * Timer is active only when:
    * - a time limit exists
-   * - quiz has not been submitted
-   * - there are questions
+   * - quiz is not submitted
+   * - questions exist
    */
   useEffect(() => {
     if (
-      typeof timeLimit !== "number" ||
-      !Number.isFinite(timeLimit) ||
-      timeLimit <= 0 ||
+      effectiveTimeLimit <= 0 ||
       submitted ||
       validQuestions.length === 0
     ) {
@@ -173,19 +219,19 @@ export function QuizContainer({
       window.clearInterval(timer);
     };
   }, [
-    timeLimit,
+    effectiveTimeLimit,
     timeLeft,
     submitted,
     validQuestions.length,
   ]);
 
   /**
-   * Automatically submit when timer reaches zero.
+   * Automatically submit when timer
+   * reaches zero.
    */
   useEffect(() => {
     if (
-      typeof timeLimit !== "number" ||
-      timeLimit <= 0 ||
+      effectiveTimeLimit <= 0 ||
       timeLeft !== 0 ||
       submitted ||
       validQuestions.length === 0
@@ -195,7 +241,7 @@ export function QuizContainer({
 
     submit();
   }, [
-    timeLimit,
+    effectiveTimeLimit,
     timeLeft,
     submitted,
     validQuestions.length,
@@ -205,8 +251,8 @@ export function QuizContainer({
   /**
    * Save result after quiz submission.
    *
-   * The API receives numeric zero-based answer
-   * indexes.
+   * API receives numeric zero-based
+   * answer indexes.
    */
   useEffect(() => {
     if (
@@ -233,7 +279,8 @@ export function QuizContainer({
           const questionId =
             getQuestionId(question);
 
-          const answer = answers[questionId];
+          const answer =
+            answers[questionId];
 
           if (
             answer === undefined ||
@@ -243,15 +290,17 @@ export function QuizContainer({
             continue;
           }
 
-          const answerIndex = Number(answer);
+          const answerIndex =
+            Number(answer);
 
           if (
             Number.isInteger(answerIndex) &&
             answerIndex >= 0 &&
             answerIndex <= 3
           ) {
-            normalizedAnswers[questionId] =
-              answerIndex;
+            normalizedAnswers[
+              questionId
+            ] = answerIndex;
           }
         }
 
@@ -262,7 +311,9 @@ export function QuizContainer({
                 getQuestionId(question);
 
               const selected =
-                normalizedAnswers[questionId];
+                normalizedAnswers[
+                  questionId
+                ];
 
               const correct =
                 getCorrectAnswerIndex(
@@ -285,73 +336,106 @@ export function QuizContainer({
         const total =
           validQuestions.length;
 
+        const attemptedQuestions =
+          Object.keys(
+            normalizedAnswers
+          ).length;
+
+        const unanswered =
+          total - attemptedQuestions;
+
         const percentage =
           total > 0
             ? Math.round(
-                (correctCount / total) * 100
+                (correctCount / total) *
+                  100
               )
             : 0;
 
-        const unanswered =
-          total -
-          Object.keys(normalizedAnswers)
-            .length;
+        const incorrectQuestions =
+          validQuestions.filter(
+            (question) => {
+              const questionId =
+                getQuestionId(question);
+
+              const selected =
+                normalizedAnswers[
+                  questionId
+                ];
+
+              const correct =
+                getCorrectAnswerIndex(
+                  question
+                );
+
+              return (
+                selected !== undefined &&
+                correct >= 0 &&
+                selected !== correct
+              );
+            }
+          );
 
         const payload = {
+          examId: examId || "",
           examSlug: examSlug || "",
-          subjectSlug: subjectSlug || "",
+
+          examName:
+            examName ||
+            title ||
+            "",
+
+          subjectSlug:
+            subjectSlug || "",
+
           mode,
+
+          resultType:
+            resultType ||
+            mode,
+
           title,
+
           totalQuestions: total,
-          attemptedQuestions:
-            Object.keys(normalizedAnswers)
-              .length,
-          unansweredQuestions: unanswered,
-          correctAnswers: correctCount,
+
+          attemptedQuestions,
+
+          unansweredQuestions:
+            unanswered,
+
+          correctAnswers:
+            correctCount,
+
           incorrectAnswers:
-            Object.keys(normalizedAnswers)
-              .filter((questionId) => {
-                const question =
-                  validQuestions.find(
-                    (item) =>
-                      getQuestionId(item) ===
-                      questionId
-                  );
+            incorrectQuestions.length,
 
-                if (!question) {
-                  return false;
-                }
-
-                return (
-                  normalizedAnswers[
-                    questionId
-                  ] !==
-                  getCorrectAnswerIndex(
-                    question
-                  )
-                );
-              }).length,
           percentage,
-          answers: normalizedAnswers,
+
+          answers:
+            normalizedAnswers,
         };
 
         const response = await fetch(
           "/api/results",
           {
             method: "POST",
+
             headers: {
               "Content-Type":
                 "application/json",
             },
-            body: JSON.stringify(payload),
+
+            body: JSON.stringify(
+              payload
+            ),
           }
         );
 
         if (!response.ok) {
           const data =
-            await response.json().catch(
-              () => null
-            );
+            await response
+              .json()
+              .catch(() => null);
 
           throw new Error(
             data?.error ||
@@ -393,10 +477,13 @@ export function QuizContainer({
     hasSubmittedResult,
     validQuestions,
     answers,
+    examId,
+    examName,
     examSlug,
     subjectSlug,
     mode,
     title,
+    resultType,
   ]);
 
   /**
@@ -443,7 +530,9 @@ export function QuizContainer({
       Object.keys(answers).filter(
         (questionId) => {
           const value =
-            Number(answers[questionId]);
+            Number(
+              answers[questionId]
+            );
 
           return (
             Number.isInteger(value) &&
@@ -460,7 +549,9 @@ export function QuizContainer({
             getQuestionId(question);
 
           const selected =
-            Number(answers[questionId]);
+            Number(
+              answers[questionId]
+            );
 
           const correct =
             getCorrectAnswerIndex(
@@ -485,7 +576,8 @@ export function QuizContainer({
     const incorrectCount =
       Math.max(
         0,
-        answeredCount - correctCount
+        answeredCount -
+          correctCount
       );
 
     const unansweredCount =
@@ -497,7 +589,8 @@ export function QuizContainer({
     const percentage =
       total > 0
         ? Math.round(
-            (correctCount / total) * 100
+            (correctCount / total) *
+              100
           )
         : 0;
 
@@ -532,6 +625,7 @@ export function QuizContainer({
               <p className="text-2xl font-bold text-slate-900 dark:text-white">
                 {total}
               </p>
+
               <p className="mt-1 text-xs font-medium text-slate-500">
                 Total
               </p>
@@ -541,6 +635,7 @@ export function QuizContainer({
               <p className="text-2xl font-bold text-emerald-600">
                 {correctCount}
               </p>
+
               <p className="mt-1 text-xs font-medium text-slate-500">
                 Correct
               </p>
@@ -550,6 +645,7 @@ export function QuizContainer({
               <p className="text-2xl font-bold text-red-600">
                 {incorrectCount}
               </p>
+
               <p className="mt-1 text-xs font-medium text-slate-500">
                 Incorrect
               </p>
@@ -559,6 +655,7 @@ export function QuizContainer({
               <p className="text-2xl font-bold text-amber-600">
                 {unansweredCount}
               </p>
+
               <p className="mt-1 text-xs font-medium text-slate-500">
                 Unanswered
               </p>
@@ -590,6 +687,7 @@ export function QuizContainer({
               className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
             >
               View Result
+
               <ArrowRight className="h-4 w-4" />
             </button>
 
@@ -601,6 +699,7 @@ export function QuizContainer({
               className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
             >
               <RotateCcw className="h-4 w-4" />
+
               Try Again
             </button>
           </div>
@@ -615,7 +714,9 @@ export function QuizContainer({
           {validQuestions.map(
             (question, index) => {
               const questionId =
-                getQuestionId(question);
+                getQuestionId(
+                  question
+                );
 
               const selected =
                 answers[questionId];
@@ -659,7 +760,10 @@ export function QuizContainer({
 
                       <div className="mt-4 space-y-2">
                         {question.options.map(
-                          (option, optionIndex) => {
+                          (
+                            option,
+                            optionIndex
+                          ) => {
                             const isSelected =
                               selectedIndex ===
                               optionIndex;
@@ -772,7 +876,9 @@ export function QuizContainer({
     Object.keys(answers).filter(
       (questionId) => {
         const value =
-          Number(answers[questionId]);
+          Number(
+            answers[questionId]
+          );
 
         return (
           Number.isInteger(value) &&
@@ -792,7 +898,9 @@ export function QuizContainer({
       : 0;
 
   const isMarked =
-    marked.includes(currentQuestionId);
+    marked.includes(
+      currentQuestionId
+    );
 
   return (
     <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
@@ -813,19 +921,17 @@ export function QuizContainer({
             </h1>
           </div>
 
-          {typeof timeLimit ===
-            "number" &&
-            timeLimit > 0 && (
-              <div
-                className={`rounded-xl px-4 py-2 text-center font-mono text-lg font-bold ${
-                  timeLeft <= 60
-                    ? "bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400"
-                    : "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
-                }`}
-              >
-                {formatTime(timeLeft)}
-              </div>
-            )}
+          {effectiveTimeLimit > 0 && (
+            <div
+              className={`rounded-xl px-4 py-2 text-center font-mono text-lg font-bold ${
+                timeLeft <= 60
+                  ? "bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400"
+                  : "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
+              }`}
+            >
+              {formatTime(timeLeft)}
+            </div>
+          )}
         </div>
 
         <div className="mt-4">
@@ -837,7 +943,8 @@ export function QuizContainer({
 
             <span>
               {answeredCount}/
-              {validQuestions.length} answered
+              {validQuestions.length}{" "}
+              answered
             </span>
           </div>
 
@@ -896,7 +1003,10 @@ export function QuizContainer({
               {/* Options */}
               <div className="mt-7 space-y-3">
                 {current.options.map(
-                  (option, index) => {
+                  (
+                    option,
+                    index
+                  ) => {
                     const optionId =
                       String(index);
 
@@ -967,6 +1077,7 @@ export function QuizContainer({
                     className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
                   >
                     Next
+
                     <ArrowRight className="h-4 w-4" />
                   </button>
                 ) : (
@@ -1000,7 +1111,10 @@ export function QuizContainer({
 
             <div className="mt-4 grid grid-cols-5 gap-2 sm:grid-cols-8 lg:grid-cols-5">
               {validQuestions.map(
-                (question, index) => {
+                (
+                  question,
+                  index
+                ) => {
                   const questionId =
                     getQuestionId(
                       question
@@ -1010,7 +1124,8 @@ export function QuizContainer({
                     answers[questionId];
 
                   const isAnswered =
-                    answer !== undefined &&
+                    answer !==
+                      undefined &&
                     answer !== "" &&
                     Number.isInteger(
                       Number(answer)
@@ -1019,7 +1134,8 @@ export function QuizContainer({
                     Number(answer) <= 3;
 
                   const isCurrent =
-                    currentIndex === index;
+                    currentIndex ===
+                    index;
 
                   const isQuestionMarked =
                     marked.includes(
