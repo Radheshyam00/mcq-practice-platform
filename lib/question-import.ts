@@ -1,16 +1,10 @@
-export type QuestionDifficulty =
-  | "Easy"
-  | "Medium"
-  | "Hard";
+// lib/question-import.ts
+
+export type QuestionDifficulty = "Easy" | "Medium" | "Hard";
 
 export type ImportQuestion = {
   question: string;
-  options: [
-    string,
-    string,
-    string,
-    string
-  ];
+  options: [string, string, string, string];
   correctAnswer: number;
   explanation: string;
   subject: string;
@@ -27,218 +21,153 @@ export type ImportError = {
   message: string;
 };
 
-const clean = (value: unknown): string => {
-  if (
-    value === null ||
-    value === undefined
-  ) {
-    return "";
-  }
+/**
+ * Clean a value safely.
+ */
+function clean(value: unknown): string {
+  return String(value ?? "").trim();
+}
 
-  return String(value).trim();
-};
-
-const normalizeHeader = (
-  value: string
-) =>
-  value
-    .trim()
+/**
+ * Normalize CSV/JSON headers.
+ *
+ * Examples:
+ * "Correct Answer" -> "correctanswer"
+ * "correct_answer" -> "correctanswer"
+ * "Option-1"       -> "option1"
+ */
+function normalizeHeader(value: unknown): string {
+  return clean(value)
     .toLowerCase()
     .replace(/[\s_-]+/g, "");
+}
 
+/**
+ * Get a value using multiple possible field aliases.
+ */
 function getValue(
   row: Record<string, unknown>,
   aliases: string[]
 ): unknown {
-  const normalized: Record<
-    string,
-    unknown
-  > = {};
-
-  Object.entries(row).forEach(
-    ([key, value]) => {
-      normalized[
-        normalizeHeader(key)
-      ] = value;
-    }
+  const normalizedEntries: [string, unknown][] = Object.entries(row).map(
+    ([key, value]): [string, unknown] => [normalizeHeader(key), value]
   );
 
-  for (const alias of aliases) {
-    const value =
-      normalized[
-        normalizeHeader(alias)
-      ];
+  const map = new Map<string, unknown>(normalizedEntries);
 
-    if (
-      value !== undefined &&
-      value !== null &&
-      String(value).trim() !== ""
-    ) {
+  for (const alias of aliases) {
+    const value = map.get(normalizeHeader(alias));
+
+    if (value !== undefined && value !== null) {
       return value;
     }
   }
 
-  return "";
+  return undefined;
 }
 
 /**
- * Returns null when the value is invalid.
- *
- * This is different from the previous version,
- * which silently returned the default value.
+ * Strict boolean parser.
  */
-function parseBooleanStrict(
-  value: unknown
-): {
-  value: boolean | null;
-  provided: boolean;
-} {
-  if (
-    value === undefined ||
-    value === null ||
-    String(value).trim() === ""
-  ) {
-    return {
-      value: null,
-      provided: false,
-    };
+function parseBooleanStrict(value: unknown): boolean | null {
+  if (typeof value === "boolean") {
+    return value;
   }
 
-  const normalized = String(
-    value
-  )
-    .trim()
-    .toLowerCase();
+  const normalized = clean(value).toLowerCase();
 
-  if (
-    ["true", "1", "yes", "y"].includes(
-      normalized
-    )
-  ) {
-    return {
-      value: true,
-      provided: true,
-    };
+  if (["true", "1", "yes", "y"].includes(normalized)) {
+    return true;
   }
 
-  if (
-    ["false", "0", "no", "n"].includes(
-      normalized
-    )
-  ) {
-    return {
-      value: false,
-      provided: true,
-    };
+  if (["false", "0", "no", "n"].includes(normalized)) {
+    return false;
   }
 
-  return {
-    value: null,
-    provided: true,
-  };
+  return null;
 }
 
+/**
+ * Parse difficulty.
+ */
 function parseDifficultyStrict(
   value: unknown
-): {
-  value: QuestionDifficulty | null;
-  provided: boolean;
-} {
-  const normalized = clean(value)
-    .toLowerCase();
-
-  if (!normalized) {
-    return {
-      value: null,
-      provided: false,
-    };
-  }
+): QuestionDifficulty | null {
+  const normalized = clean(value).toLowerCase();
 
   if (normalized === "easy") {
-    return {
-      value: "Easy",
-      provided: true,
-    };
+    return "Easy";
   }
 
   if (normalized === "medium") {
-    return {
-      value: "Medium",
-      provided: true,
-    };
+    return "Medium";
   }
 
   if (normalized === "hard") {
-    return {
-      value: "Hard",
-      provided: true,
-    };
+    return "Hard";
   }
 
-  return {
-    value: null,
-    provided: true,
-  };
+  return null;
 }
 
+/**
+ * Parse correct answer.
+ *
+ * CANONICAL FORMAT:
+ * A = 0
+ * B = 1
+ * C = 2
+ * D = 3
+ *
+ * Also accepts:
+ * - "A", "B", "C", "D"
+ * - 0, 1, 2, 3
+ * - exact option text
+ *
+ * For imports, numeric values 0-3 are treated as zero-based.
+ *
+ * Numeric 1-4 is intentionally NOT interpreted as one-based because
+ * that creates ambiguity with the canonical value 1 = option B.
+ */
 function parseCorrectAnswer(
   value: unknown,
-  options: string[]
+  options: [string, string, string, string]
 ): number | null {
-  const raw = clean(value);
+  if (typeof value === "number") {
+    if (
+      Number.isInteger(value) &&
+      value >= 0 &&
+      value <= 3
+    ) {
+      return value;
+    }
 
-  if (!raw) {
     return null;
   }
 
-  const normalized =
-    raw.toLowerCase();
+  const normalized = clean(value);
 
-  /*
-   * A / B / C / D
-   */
-  const letters: Record<
-    string,
-    number
-  > = {
-    a: 0,
-    b: 1,
-    c: 2,
-    d: 3,
-  };
-
-  if (
-    letters[normalized] !==
-    undefined
-  ) {
-    return letters[normalized];
+  if (!normalized) {
+    return null;
   }
 
-  /*
-   * 0 / 1 / 2 / 3
-   */
+  const upper = normalized.toUpperCase();
+
+  if (upper === "A") return 0;
+  if (upper === "B") return 1;
+  if (upper === "C") return 2;
+  if (upper === "D") return 3;
+
+  // Canonical numeric representation: 0-3.
   if (/^[0-3]$/.test(normalized)) {
     return Number(normalized);
   }
 
-  /*
-   * 1 / 2 / 3 / 4
-   */
-  if (/^[1-4]$/.test(normalized)) {
-    return Number(normalized) - 1;
-  }
-
-  /*
-   * Exact option text
-   */
-  const optionIndex =
-    options.findIndex(
-      (option) =>
-        option
-          .trim()
-          .toLowerCase() ===
-        normalized
-    );
+  // Allow exact option text.
+  const optionIndex = options.findIndex(
+    (option) =>
+      option.trim().toLowerCase() === normalized.toLowerCase()
+  );
 
   if (optionIndex >= 0) {
     return optionIndex;
@@ -247,384 +176,262 @@ function parseCorrectAnswer(
   return null;
 }
 
+/**
+ * Normalize a single imported question.
+ */
 export function normalizeQuestion(
-  row: Record<string, unknown>,
-  rowNumber: number
+  row: Record<string, unknown>
 ): {
-  data: ImportQuestion | null;
+  question: ImportQuestion | null;
   errors: ImportError[];
 } {
-  const errors: ImportError[] =
-    [];
+  const errors: ImportError[] = [];
 
-  /*
-   * QUESTION
-   */
   const question = clean(
-    getValue(row, [
-      "question",
-      "questionText",
-      "text",
-    ])
+    getValue(row, ["question", "Question"])
   );
 
-  /*
-   * OPTIONS
-   */
-  const optionA = clean(
+  const optionValues = [
     getValue(row, [
-      "optionA",
       "option1",
+      "option 1",
+      "optionA",
+      "option A",
       "a",
-    ])
-  );
-
-  const optionB = clean(
+    ]),
     getValue(row, [
-      "optionB",
       "option2",
+      "option 2",
+      "optionB",
+      "option B",
       "b",
-    ])
-  );
-
-  const optionC = clean(
+    ]),
     getValue(row, [
-      "optionC",
       "option3",
+      "option 3",
+      "optionC",
+      "option C",
       "c",
-    ])
-  );
-
-  const optionD = clean(
+    ]),
     getValue(row, [
-      "optionD",
       "option4",
+      "option 4",
+      "optionD",
+      "option D",
       "d",
-    ])
-  );
-
-  let options: string[] = [
-    optionA,
-    optionB,
-    optionC,
-    optionD,
+    ]),
   ];
 
-  /*
-   * JSON may provide:
+  /**
+   * Also support JSON:
    *
-   * options: [
-   *   "A",
-   *   "B",
-   *   "C",
-   *   "D"
-   * ]
+   * {
+   *   options: ["A", "B", "C", "D"]
+   * }
    */
-  const rawOptions = getValue(
-    row,
-    ["options"]
-  );
+  const rawOptions = getValue(row, ["options"]);
+
+  let options: [string, string, string, string];
 
   if (
-    Array.isArray(rawOptions)
+    Array.isArray(rawOptions) &&
+    rawOptions.length === 4
   ) {
-    if (
-      rawOptions.length === 4
-    ) {
-      options = rawOptions.map(
-        (item) => clean(item)
-      );
-    }
+    options = [
+      clean(rawOptions[0]),
+      clean(rawOptions[1]),
+      clean(rawOptions[2]),
+      clean(rawOptions[3]),
+    ];
+  } else {
+    options = [
+      clean(optionValues[0]),
+      clean(optionValues[1]),
+      clean(optionValues[2]),
+      clean(optionValues[3]),
+    ];
   }
 
-  /*
-   * QUESTION ERROR
-   */
-  if (!question) {
-    errors.push({
-      row: rowNumber,
-      field: "question",
-      message:
-        "Question is required.",
-    });
-  }
+  const missingOptions = options.some(
+    (option) => !option
+  );
 
-  /*
-   * OPTION ERRORS
-   *
-   * Report every missing option
-   * individually so the editor can
-   * fix the exact field.
-   */
-  if (!options[0]) {
+  if (missingOptions) {
     errors.push({
-      row: rowNumber,
-      field: "option1",
-      message:
-        "Option 1 is required.",
-    });
-  }
-
-  if (!options[1]) {
-    errors.push({
-      row: rowNumber,
-      field: "option2",
-      message:
-        "Option 2 is required.",
-    });
-  }
-
-  if (!options[2]) {
-    errors.push({
-      row: rowNumber,
-      field: "option3",
-      message:
-        "Option 3 is required.",
-    });
-  }
-
-  if (!options[3]) {
-    errors.push({
-      row: rowNumber,
-      field: "option4",
-      message:
-        "Option 4 is required.",
-    });
-  }
-
-  /*
-   * EXACTLY FOUR OPTIONS
-   */
-  if (options.length !== 4) {
-    errors.push({
-      row: rowNumber,
+      row: 0,
       field: "options",
       message:
-        "Exactly 4 options are required.",
+        "All four options are required. Use option1-option4 or an options array with exactly 4 values.",
     });
   }
 
-  /*
-   * CORRECT ANSWER
-   */
-  const correctAnswerRaw =
-    getValue(row, [
-      "correctAnswer",
-      "answer",
-      "correct",
-    ]);
+  const rawCorrectAnswer = getValue(row, [
+    "correctAnswer",
+    "correct answer",
+    "correct_answer",
+    "answer",
+    "correctOption",
+    "correct option",
+  ]);
 
-  const correctAnswer =
-    parseCorrectAnswer(
-      correctAnswerRaw,
-      options
-    );
+  const correctAnswer = parseCorrectAnswer(
+    rawCorrectAnswer,
+    options
+  );
 
   if (correctAnswer === null) {
     errors.push({
-      row: rowNumber,
+      row: 0,
       field: "correctAnswer",
       message:
-        "Correct answer must be A/B/C/D, 0-3, 1-4, or exact option text.",
+        "Correct answer must be A, B, C, D, a zero-based number 0-3, or exactly match one of the four options.",
     });
   }
 
-  /*
-   * EXPLANATION
-   */
+  if (!question) {
+    errors.push({
+      row: 0,
+      field: "question",
+      message: "Question is required.",
+    });
+  }
+
   const explanation = clean(
-    getValue(row, [
-      "explanation",
-      "solution",
-    ])
+    getValue(row, ["explanation"])
   );
 
-  if (!explanation) {
-    errors.push({
-      row: rowNumber,
-      field: "explanation",
-      message:
-        "Explanation is required.",
-    });
-  }
-
-  /*
-   * SUBJECT
-   */
-  const subject = clean(
-    getValue(row, ["subject"])
-  );
-
-  if (!subject) {
-    errors.push({
-      row: rowNumber,
-      field: "subject",
-      message:
-        "Subject is required.",
-    });
-  }
-
-  /*
-   * TOPIC
-   */
-  const topic = clean(
-    getValue(row, [
-      "topic",
-      "chapter",
-    ])
-  );
-
-  if (!topic) {
-    errors.push({
-      row: rowNumber,
-      field: "topic",
-      message:
-        "Topic is required.",
-    });
-  }
-
-  /*
-   * EXAM
-   */
   const exam = clean(
     getValue(row, [
       "exam",
+      "examName",
+      "exam name",
       "examSlug",
-      "examId",
     ])
   );
 
   if (!exam) {
     errors.push({
-      row: rowNumber,
+      row: 0,
       field: "exam",
-      message:
-        "Exam is required.",
+      message: "Exam is required.",
     });
   }
 
-  /*
-   * DIFFICULTY
-   */
-  const difficultyResult =
-    parseDifficultyStrict(
-      getValue(row, [
-        "difficulty",
-        "level",
-      ])
-    );
+  const subject = clean(
+    getValue(row, [
+      "subject",
+      "subjectName",
+      "subject name",
+      "subjectSlug",
+    ])
+  );
 
-  let difficulty: QuestionDifficulty =
-    "Medium";
-
-  if (
-    !difficultyResult.provided
-  ) {
-    difficulty = "Medium";
-  } else if (
-    difficultyResult.value === null
-  ) {
+  if (!subject) {
     errors.push({
-      row: rowNumber,
+      row: 0,
+      field: "subject",
+      message: "Subject is required.",
+    });
+  }
+
+  const topic = clean(
+    getValue(row, ["topic"])
+  );
+
+  if (!topic) {
+    errors.push({
+      row: 0,
+      field: "topic",
+      message: "Topic is required.",
+    });
+  }
+
+  const rawDifficulty = getValue(row, [
+    "difficulty",
+  ]);
+
+  const difficulty =
+    parseDifficultyStrict(rawDifficulty);
+
+  if (!difficulty) {
+    errors.push({
+      row: 0,
       field: "difficulty",
       message:
         "Difficulty must be Easy, Medium, or Hard.",
     });
-  } else {
-    difficulty =
-      difficultyResult.value;
   }
 
-  /*
-   * DAILY QUIZ
-   */
-  const dailyQuizResult =
-    parseBooleanStrict(
-      getValue(row, [
-        "isDailyQuiz",
-        "dailyQuiz",
-      ])
-    );
+  const rawDailyQuiz = getValue(row, [
+    "isDailyQuiz",
+    "is daily quiz",
+    "dailyQuiz",
+    "daily quiz",
+  ]);
 
   let isDailyQuiz = false;
 
   if (
-    !dailyQuizResult.provided
+    rawDailyQuiz !== undefined &&
+    clean(rawDailyQuiz) !== ""
   ) {
-    isDailyQuiz = false;
-  } else if (
-    dailyQuizResult.value === null
-  ) {
-    errors.push({
-      row: rowNumber,
-      field: "isDailyQuiz",
-      message:
-        "isDailyQuiz must be true or false.",
-    });
-  } else {
-    isDailyQuiz =
-      dailyQuizResult.value;
+    const parsed = parseBooleanStrict(rawDailyQuiz);
+
+    if (parsed === null) {
+      errors.push({
+        row: 0,
+        field: "isDailyQuiz",
+        message:
+          "isDailyQuiz must be true/false, 1/0, yes/no, or y/n.",
+      });
+    } else {
+      isDailyQuiz = parsed;
+    }
   }
 
-  /*
-   * ACTIVE
-   */
-  const activeResult =
-    parseBooleanStrict(
-      getValue(row, [
-        "isActive",
-        "active",
-      ])
-    );
+  const rawActive = getValue(row, [
+    "isActive",
+    "is active",
+    "active",
+  ]);
 
   let isActive = true;
 
-  if (!activeResult.provided) {
-    isActive = true;
-  } else if (
-    activeResult.value === null
+  if (
+    rawActive !== undefined &&
+    clean(rawActive) !== ""
   ) {
-    errors.push({
-      row: rowNumber,
-      field: "isActive",
-      message:
-        "isActive must be true or false.",
-    });
-  } else {
-    isActive =
-      activeResult.value;
+    const parsed = parseBooleanStrict(rawActive);
+
+    if (parsed === null) {
+      errors.push({
+        row: 0,
+        field: "isActive",
+        message:
+          "isActive must be true/false, 1/0, yes/no, or y/n.",
+      });
+    } else {
+      isActive = parsed;
+    }
   }
 
-  /*
-   * DO NOT CREATE DATA WHEN
-   * VALIDATION ERRORS EXIST.
-   */
-  if (
-    errors.length > 0 ||
-    correctAnswer === null ||
-    options.length !== 4
-  ) {
+  if (errors.length > 0) {
     return {
-      data: null,
+      question: null,
       errors,
     };
   }
 
   return {
-    data: {
+    question: {
       question,
-      options: options as [
-        string,
-        string,
-        string,
-        string
-      ],
-      correctAnswer,
+      options,
+      correctAnswer: correctAnswer as number,
       explanation,
+      exam,
       subject,
       topic,
-      exam,
-      difficulty,
+      difficulty: difficulty as QuestionDifficulty,
       isDailyQuiz,
       isActive,
     },
@@ -632,71 +439,63 @@ export function normalizeQuestion(
   };
 }
 
+/**
+ * Validate all imported rows.
+ */
 export function validateImportRows(
-  rows: Record<
-    string,
-    unknown
-  >[]
-) {
-  const errors: ImportError[] =
-    [];
+  rows: Record<string, unknown>[]
+): {
+  questions: ImportQuestion[];
+  errors: ImportError[];
+} {
+  const questions: ImportQuestion[] = [];
+  const errors: ImportError[] = [];
 
-  const questions: ImportQuestion[] =
-    [];
-
-  const duplicateKeys =
-    new Set<string>();
+  const seen = new Set<string>();
 
   rows.forEach((row, index) => {
-    /*
-     * CSV:
-     *
-     * Row 1 = header
-     * Row 2 = first question
-     *
-     * Therefore index 0 = row 2.
-     */
-    const rowNumber =
-      index + 2;
+    // CSV header is row 1, therefore first data row = 2.
+    const rowNumber = index + 2;
 
-    const result =
-      normalizeQuestion(
-        row,
-        rowNumber
-      );
+    const result = normalizeQuestion(row);
 
-    errors.push(
-      ...result.errors
-    );
-
-    if (result.data) {
-      const duplicateKey =
-        `${result.data.exam.toLowerCase()}::${result.data.question
-          .toLowerCase()
-          .replace(/\s+/g, " ")
-          .trim()}`;
-
-      if (
-        duplicateKeys.has(
-          duplicateKey
-        )
-      ) {
-        errors.push({
-          row: rowNumber,
-          field: "question",
-          message:
-            "Duplicate question found in this import file.",
-        });
-      } else {
-        duplicateKeys.add(
-          duplicateKey
-        );
-
-        questions.push(
-          result.data
-        );
-      }
+    for (const error of result.errors) {
+      errors.push({
+        ...error,
+        row: rowNumber,
+      });
     }
+
+    if (!result.question) {
+      return;
+    }
+
+    const normalizedQuestion = result.question.question
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+
+    const normalizedExam = result.question.exam
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ");
+
+    const duplicateKey =
+      `${normalizedExam}::${normalizedQuestion}`;
+
+    if (seen.has(duplicateKey)) {
+      errors.push({
+        row: rowNumber,
+        field: "question",
+        message:
+          "Duplicate question found in the import file for the same exam.",
+      });
+
+      return;
+    }
+
+    seen.add(duplicateKey);
+    questions.push(result.question);
   });
 
   return {

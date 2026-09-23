@@ -1,817 +1,1092 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
+  ArrowLeft,
+  ArrowRight,
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   Flag,
-  ListChecks,
-  Send,
+  RotateCcw,
+  Trophy,
 } from "lucide-react";
 
-import { useQuiz } from "@/hooks/useQuiz";
-import { useTimer } from "@/hooks/useTimer";
-
-import { QuestionCard } from "./QuestionCard";
-import { QuestionNumber } from "./QuestionNumber";
-import { QuizProgress } from "./QuizProgress";
-import { QuizTimer } from "./QuizTimer";
-import { Explanation } from "./Explanation";
-import { QuizResult } from "./QuizResult";
-
-import { Button } from "@/components/common/Button";
 import type { Question } from "@/types/question";
+import { useQuiz } from "@/hooks/useQuiz";
 
 type QuizContainerProps = {
   questions: Question[];
-  durationMinutes?: number;
-
-  examId?: string;
-  examName?: string;
-
-  resultType?: "practice" | "mock-test" | "daily-quiz";
+  mode?: "practice" | "mock-test" | "daily";
+  examSlug?: string;
+  subjectSlug?: string;
+  title?: string;
+  timeLimit?: number;
 };
 
-export function QuizContainer({
-  questions,
-  durationMinutes = 30,
-  examId,
-  examName,
-  resultType = "practice",
-}: QuizContainerProps) {
-  const quiz = useQuiz(questions);
+function getQuestionId(question: Question): string {
+  return String(question.id);
+}
 
-  /*
-   * Prevent duplicate result submissions.
-   */
-  const resultSaved = useRef(false);
+/**
+ * Canonical answer mapping:
+ *
+ * A = 0
+ * B = 1
+ * C = 2
+ * D = 3
+ */
+function getCorrectAnswerIndex(question: Question): number {
+  const value = Number(question.correctAnswer);
 
-  /*
-   * Store the starting time.
-   *
-   * This allows us to calculate the actual time taken.
-   */
-  const startTimeRef = useRef<number>(Date.now());
+  if (
+    !Number.isInteger(value) ||
+    value < 0 ||
+    value > 3
+  ) {
+    return -1;
+  }
 
-  /*
-   * Timer finish
-   */
-  const finish = useCallback(() => {
-    quiz.submit();
-  }, [quiz]);
+  return value;
+}
 
-  const timer = useTimer(
-    durationMinutes * 60,
-    !quiz.submitted,
-    finish
+function formatTime(seconds: number): string {
+  const safeSeconds = Math.max(
+    0,
+    Math.floor(seconds)
   );
 
-  /*
-   * Save result after quiz is submitted.
+  const minutes = Math.floor(
+    safeSeconds / 60
+  );
+
+  const remainingSeconds =
+    safeSeconds % 60;
+
+  return `${String(minutes).padStart(2, "0")}:${String(
+    remainingSeconds
+  ).padStart(2, "0")}`;
+}
+
+export default function QuizContainer({
+  questions,
+  mode = "practice",
+  examSlug,
+  subjectSlug,
+  title = "Quiz",
+  timeLimit,
+}: QuizContainerProps) {
+  const router = useRouter();
+
+  const validQuestions = useMemo(
+    () =>
+      Array.isArray(questions)
+        ? questions.filter(Boolean)
+        : [],
+    [questions]
+  );
+
+  const quiz = useQuiz(validQuestions);
+
+  const {
+    current,
+    currentIndex,
+    answers,
+    marked,
+    submitted,
+    result,
+    choose,
+    toggleMark,
+    next,
+    previous,
+    goTo,
+    submit,
+  } = quiz;
+
+  const [timeLeft, setTimeLeft] = useState(
+    typeof timeLimit === "number"
+      ? Math.max(0, timeLimit)
+      : 0
+  );
+
+  const [hasSubmittedResult, setHasSubmittedResult] =
+    useState(false);
+
+  const [savingResult, setSavingResult] =
+    useState(false);
+
+  const [saveError, setSaveError] =
+    useState("");
+
+  /**
+   * Reset timer when the question set or time
+   * limit changes.
    */
   useEffect(() => {
-    if (!quiz.submitted) {
-      return;
-    }
-
-    /*
-     * Don't save more than once.
-     */
-    if (resultSaved.current) {
-      return;
-    }
-
-    /*
-     * examId is required by Result model.
-     */
-    if (!examId) {
-      console.error(
-        "RESULT NOT SAVED: examId is missing."
+    if (
+      typeof timeLimit === "number" &&
+      Number.isFinite(timeLimit)
+    ) {
+      setTimeLeft(
+        Math.max(0, Math.floor(timeLimit))
       );
+    } else {
+      setTimeLeft(0);
+    }
+  }, [timeLimit, validQuestions.length]);
 
+  /**
+   * Countdown timer.
+   *
+   * Timer is only active when:
+   * - a time limit exists
+   * - quiz has not been submitted
+   * - there are questions
+   */
+  useEffect(() => {
+    if (
+      typeof timeLimit !== "number" ||
+      !Number.isFinite(timeLimit) ||
+      timeLimit <= 0 ||
+      submitted ||
+      validQuestions.length === 0
+    ) {
       return;
     }
 
-    resultSaved.current = true;
+    if (timeLeft <= 0) {
+      return;
+    }
 
-    const saveResult = async () => {
+    const timer = window.setInterval(() => {
+      setTimeLeft((previous) => {
+        if (previous <= 1) {
+          window.clearInterval(timer);
+
+          return 0;
+        }
+
+        return previous - 1;
+      });
+    }, 1000);
+
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [
+    timeLimit,
+    timeLeft,
+    submitted,
+    validQuestions.length,
+  ]);
+
+  /**
+   * Automatically submit when timer reaches zero.
+   */
+  useEffect(() => {
+    if (
+      typeof timeLimit !== "number" ||
+      timeLimit <= 0 ||
+      timeLeft !== 0 ||
+      submitted ||
+      validQuestions.length === 0
+    ) {
+      return;
+    }
+
+    submit();
+  }, [
+    timeLimit,
+    timeLeft,
+    submitted,
+    validQuestions.length,
+    submit,
+  ]);
+
+  /**
+   * Save result after quiz submission.
+   *
+   * The API receives numeric zero-based answer
+   * indexes.
+   */
+  useEffect(() => {
+    if (
+      !submitted ||
+      hasSubmittedResult ||
+      validQuestions.length === 0
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function saveResult() {
       try {
-        /*
-         * Count answered questions.
-         */
-        const answeredCount = questions.filter(
-          (question) => {
-            const answer =
-              quiz.answers[question.id];
+        setSavingResult(true);
+        setSaveError("");
 
-            return (
-              answer !== undefined &&
-              answer !== null &&
-              answer !== ""
-            );
-          }
-        ).length;
+        const normalizedAnswers: Record<
+          string,
+          number
+        > = {};
 
-        /*
-         * Calculate correct answers.
-         *
-         * New MongoDB question structure:
-         *
-         * options: string[]
-         * correctAnswer: number
-         *
-         * Answers from QuestionCard are expected
-         * to be "0", "1", "2", or "3".
-         */
-        const getCorrectAnswerIndex = (
-          item: Question
-        ): number => {
-          const rawQuestion = item as {
-            correctAnswer?: number;
-            answerIndex?: number;
-            correctOptionIndex?: number;
-          };
+        for (const question of validQuestions) {
+          const questionId =
+            getQuestionId(question);
 
-          if (
-            typeof rawQuestion.correctAnswer === "number"
-          ) {
-            return rawQuestion.correctAnswer;
-          }
-
-          if (
-            typeof rawQuestion.answerIndex === "number"
-          ) {
-            return rawQuestion.answerIndex;
-          }
-
-          if (
-            typeof rawQuestion.correctOptionIndex === "number"
-          ) {
-            return rawQuestion.correctOptionIndex;
-          }
-
-          return -1;
-        };
-
-        let correct = 0;
-
-        questions.forEach((question) => {
-          const answer =
-            quiz.answers[question.id];
+          const answer = answers[questionId];
 
           if (
             answer === undefined ||
             answer === null ||
             answer === ""
           ) {
-            return;
+            continue;
           }
 
-          const selectedIndex = Number(answer);
-          const correctAnswerIndex =
-            getCorrectAnswerIndex(question);
+          const answerIndex = Number(answer);
 
           if (
-            !Number.isNaN(selectedIndex) &&
-            selectedIndex === correctAnswerIndex
+            Number.isInteger(answerIndex) &&
+            answerIndex >= 0 &&
+            answerIndex <= 3
           ) {
-            correct++;
+            normalizedAnswers[questionId] =
+              answerIndex;
           }
-        });
+        }
 
-        const totalQuestions =
-          questions.length;
+        const correctCount =
+          validQuestions.reduce(
+            (count, question) => {
+              const questionId =
+                getQuestionId(question);
 
-        const wrong =
-          answeredCount - correct;
+              const selected =
+                normalizedAnswers[questionId];
 
-        const skipped =
-          totalQuestions - answeredCount;
+              const correct =
+                getCorrectAnswerIndex(
+                  question
+                );
 
-        /*
-         * Calculate actual time taken.
-         */
-        const elapsedSeconds = Math.floor(
-          (Date.now() - startTimeRef.current) /
-            1000
-        );
+              if (
+                selected !== undefined &&
+                correct >= 0 &&
+                selected === correct
+              ) {
+                return count + 1;
+              }
 
-        /*
-         * Never allow time to exceed the quiz duration.
-         */
-        const timeTakenSeconds = Math.min(
-          elapsedSeconds,
-          durationMinutes * 60
-        );
+              return count;
+            },
+            0
+          );
 
-        /*
-         * Send result to MongoDB API.
-         */
+        const total =
+          validQuestions.length;
+
+        const percentage =
+          total > 0
+            ? Math.round(
+                (correctCount / total) * 100
+              )
+            : 0;
+
+        const unanswered =
+          total -
+          Object.keys(normalizedAnswers)
+            .length;
+
+        const payload = {
+          examSlug: examSlug || "",
+          subjectSlug: subjectSlug || "",
+          mode,
+          title,
+          totalQuestions: total,
+          attemptedQuestions:
+            Object.keys(normalizedAnswers)
+              .length,
+          unansweredQuestions: unanswered,
+          correctAnswers: correctCount,
+          incorrectAnswers:
+            Object.keys(normalizedAnswers)
+              .filter((questionId) => {
+                const question =
+                  validQuestions.find(
+                    (item) =>
+                      getQuestionId(item) ===
+                      questionId
+                  );
+
+                if (!question) {
+                  return false;
+                }
+
+                return (
+                  normalizedAnswers[
+                    questionId
+                  ] !==
+                  getCorrectAnswerIndex(
+                    question
+                  )
+                );
+              }).length,
+          percentage,
+          answers: normalizedAnswers,
+        };
+
         const response = await fetch(
           "/api/results",
           {
             method: "POST",
-
             headers: {
               "Content-Type":
                 "application/json",
             },
-
-            body: JSON.stringify({
-              examId,
-              examName,
-              correct,
-              wrong,
-              skipped,
-              totalQuestions,
-              timeTakenSeconds,
-              type: resultType,
-            }),
+            body: JSON.stringify(payload),
           }
         );
 
-        const data = await response.json();
+        if (!response.ok) {
+          const data =
+            await response.json().catch(
+              () => null
+            );
 
-        if (!response.ok || !data.success) {
-          console.error(
-            "FAILED TO SAVE RESULT:",
-            data.message || data
+          throw new Error(
+            data?.error ||
+              data?.message ||
+              "Failed to save quiz result."
           );
-
-          /*
-           * Allow another save attempt.
-           */
-          resultSaved.current = false;
-
-          return;
         }
 
-        console.log(
-          "RESULT SAVED SUCCESSFULLY:",
-          data.result
-        );
+        if (!cancelled) {
+          setHasSubmittedResult(true);
+        }
       } catch (error) {
         console.error(
-          "ERROR SAVING RESULT:",
+          "Failed to save quiz result:",
           error
         );
 
-        /*
-         * Allow retry if request failed.
-         */
-        resultSaved.current = false;
+        if (!cancelled) {
+          setSaveError(
+            error instanceof Error
+              ? error.message
+              : "Failed to save quiz result."
+          );
+        }
+      } finally {
+        if (!cancelled) {
+          setSavingResult(false);
+        }
       }
-    };
+    }
 
     saveResult();
+
+    return () => {
+      cancelled = true;
+    };
   }, [
-    quiz.submitted,
-    quiz.answers,
-    questions,
-    examId,
-    examName,
-    resultType,
-    durationMinutes,
+    submitted,
+    hasSubmittedResult,
+    validQuestions,
+    answers,
+    examSlug,
+    subjectSlug,
+    mode,
+    title,
   ]);
 
-  /*
-   * No questions
+  /**
+   * No questions.
    */
-  if (!questions.length) {
+  if (validQuestions.length === 0) {
     return (
-      <div
-        className="
-          mx-auto max-w-2xl rounded-3xl
-          border border-slate-200
-          bg-white
-          p-8 text-center
-          shadow-sm
-          dark:border-slate-800
-          dark:bg-slate-900
-        "
-      >
-        <div
-          className="
-            mx-auto flex h-14 w-14 items-center justify-center
-            rounded-2xl
-            bg-slate-100
-            text-slate-500
-            dark:bg-slate-800
-            dark:text-slate-400
-          "
-        >
-          <ListChecks
-            className="h-7 w-7"
-            aria-hidden="true"
-          />
+      <div className="mx-auto max-w-3xl px-4 py-12 sm:px-6">
+        <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-slate-100 dark:bg-slate-800">
+            <CheckCircle2 className="h-7 w-7 text-slate-500" />
+          </div>
+
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white">
+            No questions available
+          </h2>
+
+          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
+            There are no questions available for
+            this quiz.
+          </p>
+
+          <button
+            type="button"
+            onClick={() => router.back()}
+            className="mt-6 inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Go Back
+          </button>
         </div>
-
-        <h2 className="mt-5 text-xl font-bold text-slate-900 dark:text-white">
-          No questions available
-        </h2>
-
-        <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
-          There are currently no questions available
-          for this quiz. Please try again later.
-        </p>
       </div>
     );
   }
 
-  /*
-   * Quiz submitted
+  /**
+   * Submitted result screen.
    */
-  if (quiz.submitted) {
+  if (submitted) {
+    const total =
+      validQuestions.length;
+
+    const answeredCount =
+      Object.keys(answers).filter(
+        (questionId) => {
+          const value =
+            Number(answers[questionId]);
+
+          return (
+            Number.isInteger(value) &&
+            value >= 0 &&
+            value <= 3
+          );
+        }
+      ).length;
+
+    const correctCount =
+      validQuestions.reduce(
+        (count, question) => {
+          const questionId =
+            getQuestionId(question);
+
+          const selected =
+            Number(answers[questionId]);
+
+          const correct =
+            getCorrectAnswerIndex(
+              question
+            );
+
+          if (
+            Number.isInteger(selected) &&
+            selected >= 0 &&
+            selected <= 3 &&
+            correct >= 0 &&
+            selected === correct
+          ) {
+            return count + 1;
+          }
+
+          return count;
+        },
+        0
+      );
+
+    const incorrectCount =
+      Math.max(
+        0,
+        answeredCount - correctCount
+      );
+
+    const unansweredCount =
+      Math.max(
+        0,
+        total - answeredCount
+      );
+
+    const percentage =
+      total > 0
+        ? Math.round(
+            (correctCount / total) * 100
+          )
+        : 0;
+
     return (
-      <QuizResult result={quiz.result} />
+      <div className="mx-auto max-w-5xl px-4 py-8 sm:px-6 lg:px-8">
+        <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900">
+          <div className="bg-slate-900 px-6 py-10 text-center text-white sm:px-10">
+            <div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-full bg-white/10">
+              <Trophy className="h-8 w-8" />
+            </div>
+
+            <p className="text-sm font-medium text-slate-300">
+              Quiz completed
+            </p>
+
+            <h1 className="mt-2 text-3xl font-bold sm:text-4xl">
+              {title}
+            </h1>
+
+            <div className="mt-6 text-5xl font-black">
+              {percentage}%
+            </div>
+
+            <p className="mt-2 text-sm text-slate-300">
+              {correctCount} of {total}{" "}
+              questions correct
+            </p>
+          </div>
+
+          <div className="grid grid-cols-2 divide-x divide-y border-b border-slate-200 dark:divide-slate-800 dark:border-slate-800 sm:grid-cols-4 sm:divide-y-0">
+            <div className="p-5 text-center">
+              <p className="text-2xl font-bold text-slate-900 dark:text-white">
+                {total}
+              </p>
+              <p className="mt-1 text-xs font-medium text-slate-500">
+                Total
+              </p>
+            </div>
+
+            <div className="p-5 text-center">
+              <p className="text-2xl font-bold text-emerald-600">
+                {correctCount}
+              </p>
+              <p className="mt-1 text-xs font-medium text-slate-500">
+                Correct
+              </p>
+            </div>
+
+            <div className="p-5 text-center">
+              <p className="text-2xl font-bold text-red-600">
+                {incorrectCount}
+              </p>
+              <p className="mt-1 text-xs font-medium text-slate-500">
+                Incorrect
+              </p>
+            </div>
+
+            <div className="p-5 text-center">
+              <p className="text-2xl font-bold text-amber-600">
+                {unansweredCount}
+              </p>
+              <p className="mt-1 text-xs font-medium text-slate-500">
+                Unanswered
+              </p>
+            </div>
+          </div>
+
+          {savingResult && (
+            <div className="border-b border-slate-200 bg-slate-50 px-6 py-3 text-center text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-400">
+              Saving your result...
+            </div>
+          )}
+
+          {saveError && (
+            <div className="border-b border-red-200 bg-red-50 px-6 py-3 text-center text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+              {saveError}
+            </div>
+          )}
+
+          <div className="flex flex-col gap-3 p-6 sm:flex-row sm:justify-center sm:p-8">
+            <button
+              type="button"
+              onClick={() =>
+                router.push(
+                  `/exams/${
+                    examSlug || ""
+                  }/result`
+                )
+              }
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-6 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+            >
+              View Result
+              <ArrowRight className="h-4 w-4" />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                window.location.reload();
+              }}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 px-6 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+            >
+              <RotateCcw className="h-4 w-4" />
+              Try Again
+            </button>
+          </div>
+        </div>
+
+        {/* Question review */}
+        <div className="mt-8 space-y-4">
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white">
+            Question Review
+          </h2>
+
+          {validQuestions.map(
+            (question, index) => {
+              const questionId =
+                getQuestionId(question);
+
+              const selected =
+                answers[questionId];
+
+              const selectedIndex =
+                selected === undefined
+                  ? -1
+                  : Number(selected);
+
+              const correctIndex =
+                getCorrectAnswerIndex(
+                  question
+                );
+
+              const answered =
+                Number.isInteger(
+                  selectedIndex
+                ) &&
+                selectedIndex >= 0 &&
+                selectedIndex <= 3;
+
+              const isCorrect =
+                answered &&
+                selectedIndex ===
+                  correctIndex;
+
+              return (
+                <div
+                  key={questionId}
+                  className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900"
+                >
+                  <div className="flex items-start gap-3">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-sm font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                      {index + 1}
+                    </span>
+
+                    <div className="min-w-0 flex-1">
+                      <p className="font-semibold leading-6 text-slate-900 dark:text-white">
+                        {question.question}
+                      </p>
+
+                      <div className="mt-4 space-y-2">
+                        {question.options.map(
+                          (option, optionIndex) => {
+                            const isSelected =
+                              selectedIndex ===
+                              optionIndex;
+
+                            const isAnswer =
+                              correctIndex ===
+                              optionIndex;
+
+                            let classes =
+                              "border-slate-200 dark:border-slate-700";
+
+                            if (
+                              isAnswer
+                            ) {
+                              classes =
+                                "border-emerald-500 bg-emerald-50 dark:border-emerald-500 dark:bg-emerald-950/30";
+                            } else if (
+                              isSelected
+                            ) {
+                              classes =
+                                "border-red-500 bg-red-50 dark:border-red-500 dark:bg-red-950/30";
+                            }
+
+                            return (
+                              <div
+                                key={`${questionId}-${optionIndex}`}
+                                className={`rounded-xl border p-3 ${classes}`}
+                              >
+                                <div className="flex items-start gap-3">
+                                  <span className="font-bold text-slate-500">
+                                    {String.fromCharCode(
+                                      65 +
+                                        optionIndex
+                                    )}
+                                    .
+                                  </span>
+
+                                  <span className="flex-1 text-sm text-slate-700 dark:text-slate-300">
+                                    {option}
+                                  </span>
+
+                                  {isAnswer && (
+                                    <span className="text-xs font-semibold text-emerald-600">
+                                      Correct
+                                    </span>
+                                  )}
+
+                                  {isSelected &&
+                                    !isAnswer && (
+                                      <span className="text-xs font-semibold text-red-600">
+                                        Your answer
+                                      </span>
+                                    )}
+                                </div>
+                              </div>
+                            );
+                          }
+                        )}
+                      </div>
+
+                      {question.explanation && (
+                        <div className="mt-4 rounded-xl bg-slate-50 p-4 dark:bg-slate-800/60">
+                          <p className="text-xs font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                            Explanation
+                          </p>
+
+                          <p className="mt-1 text-sm leading-6 text-slate-700 dark:text-slate-300">
+                            {question.explanation}
+                          </p>
+                        </div>
+                      )}
+
+                      <div className="mt-3 text-sm font-medium">
+                        {isCorrect ? (
+                          <span className="text-emerald-600">
+                            ✓ Correct answer
+                          </span>
+                        ) : answered ? (
+                          <span className="text-red-600">
+                            ✕ Incorrect answer
+                          </span>
+                        ) : (
+                          <span className="text-amber-600">
+                            Not answered
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+          )}
+        </div>
+      </div>
     );
   }
 
-  const currentQuestion = quiz.current;
+  if (!current) {
+    return null;
+  }
 
-  const currentAnswer =
-    quiz.answers[currentQuestion.id];
+  const currentQuestionId =
+    getQuestionId(current);
 
-  const isMarked = quiz.marked.includes(
-    currentQuestion.id
-  );
+  const selectedAnswer =
+    answers[currentQuestionId];
 
-  const isFirstQuestion =
-    quiz.currentIndex === 0;
+  const answeredCount =
+    Object.keys(answers).filter(
+      (questionId) => {
+        const value =
+          Number(answers[questionId]);
 
-  const isLastQuestion =
-    quiz.currentIndex ===
-    questions.length - 1;
+        return (
+          Number.isInteger(value) &&
+          value >= 0 &&
+          value <= 3
+        );
+      }
+    ).length;
 
-  const answeredCount = questions.filter(
-    (question) => {
-      const answer =
-        quiz.answers[question.id];
+  const progress =
+    validQuestions.length > 0
+      ? Math.round(
+          ((currentIndex + 1) /
+            validQuestions.length) *
+            100
+        )
+      : 0;
 
-      return (
-        answer !== undefined &&
-        answer !== null &&
-        answer !== ""
-      );
-    }
-  ).length;
+  const isMarked =
+    marked.includes(currentQuestionId);
 
   return (
-    <div className="mx-auto w-full max-w-7xl">
-      {/* Top quiz header */}
-      <div
-        className="
-          mb-5 overflow-hidden rounded-3xl
-          border border-slate-200
-          bg-white
-          shadow-sm
-          dark:border-slate-800
-          dark:bg-slate-900
-        "
-      >
-        <div className="flex flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-center gap-3">
-            <div
-              className="
-                flex h-10 w-10 shrink-0 items-center justify-center
-                rounded-xl
-                bg-indigo-50
-                text-indigo-600
-                dark:bg-indigo-500/10
-                dark:text-indigo-400
-              "
-            >
-              <ListChecks
-                className="h-5 w-5"
-                aria-hidden="true"
-              />
-            </div>
+    <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6 lg:px-8">
+      {/* Header */}
+      <div className="mb-5 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              {mode === "mock-test"
+                ? "Mock Test"
+                : mode === "daily"
+                  ? "Daily Quiz"
+                  : "Practice"}
+            </p>
 
-            <div>
-              <p className="text-xs font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">
-                Quiz in progress
-              </p>
-
-              <p className="mt-0.5 text-sm font-semibold text-slate-800 dark:text-slate-200">
-                Question{" "}
-                {quiz.currentIndex + 1} of{" "}
-                {questions.length}
-              </p>
-            </div>
+            <h1 className="mt-1 text-lg font-bold text-slate-900 dark:text-white">
+              {title}
+            </h1>
           </div>
 
-          {/* Timer */}
-          <div
-            className="
-              flex items-center justify-between gap-3
-              rounded-2xl
-              border border-slate-200
-              bg-slate-50
-              px-3 py-2
-              dark:border-slate-700
-              dark:bg-slate-950
-            "
-          >
-            <span className="text-xs font-semibold text-slate-500 dark:text-slate-400">
-              Time remaining
+          {typeof timeLimit ===
+            "number" &&
+            timeLimit > 0 && (
+              <div
+                className={`rounded-xl px-4 py-2 text-center font-mono text-lg font-bold ${
+                  timeLeft <= 60
+                    ? "bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400"
+                    : "bg-slate-100 text-slate-900 dark:bg-slate-800 dark:text-white"
+                }`}
+              >
+                {formatTime(timeLeft)}
+              </div>
+            )}
+        </div>
+
+        <div className="mt-4">
+          <div className="mb-2 flex items-center justify-between text-xs font-medium text-slate-500 dark:text-slate-400">
+            <span>
+              Question {currentIndex + 1} of{" "}
+              {validQuestions.length}
             </span>
 
-            <QuizTimer
-              seconds={timer.seconds}
+            <span>
+              {answeredCount}/
+              {validQuestions.length} answered
+            </span>
+          </div>
+
+          <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
+            <div
+              className="h-full rounded-full bg-slate-900 transition-all duration-300 dark:bg-white"
+              style={{
+                width: `${progress}%`,
+              }}
             />
           </div>
         </div>
       </div>
 
-      {/* Main layout */}
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
-        {/* Main quiz area */}
-        <main className="min-w-0">
-          {/* Question controls */}
-          <div className="mb-5 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <QuestionNumber
-              number={quiz.currentIndex + 1}
-              total={questions.length}
-            />
+      <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
+        {/* Question */}
+        <main>
+          <div className="rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="p-5 sm:p-7">
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex min-w-0 items-start gap-3">
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-sm font-bold text-white dark:bg-white dark:text-slate-900">
+                    {currentIndex + 1}
+                  </span>
 
-            <div
-              className="
-                flex items-center gap-2
-                self-start
-                rounded-xl
-                border border-slate-200
-                bg-white
-                px-3 py-2
-                text-xs font-semibold
-                text-slate-600
-                dark:border-slate-800
-                dark:bg-slate-900
-                dark:text-slate-300
-              "
-            >
-              <CheckCircle2
-                className="h-4 w-4 text-emerald-500"
-                aria-hidden="true"
-              />
+                  <h2 className="text-lg font-bold leading-7 text-slate-900 dark:text-white sm:text-xl">
+                    {current.question}
+                  </h2>
+                </div>
 
-              {answeredCount} answered
-            </div>
-          </div>
-
-          {/* Progress */}
-          <div className="mb-5">
-            <QuizProgress
-              current={quiz.currentIndex}
-              total={questions.length}
-            />
-          </div>
-
-          {/* Question */}
-          <QuestionCard
-            question={currentQuestion}
-            selected={currentAnswer}
-            onSelect={quiz.choose}
-          />
-
-          {/* Explanation */}
-          {currentAnswer !== undefined &&
-            currentAnswer !== "" && (
-              <Explanation
-                text={currentQuestion.explanation}
-              />
-            )}
-
-          {/* Bottom navigation */}
-          <div
-            className="
-              mt-5 rounded-3xl
-              border border-slate-200
-              bg-white
-              p-4
-              shadow-sm
-              dark:border-slate-800
-              dark:bg-slate-900
-              sm:p-5
-            "
-          >
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              {/* Previous */}
-              <Button
-                variant="outline"
-                disabled={isFirstQuestion}
-                onClick={quiz.previous}
-              >
-                <ChevronLeft
-                  className="mr-1 h-4 w-4"
-                  aria-hidden="true"
-                />
-
-                Previous
-              </Button>
-
-              {/* Actions */}
-              <div className="flex w-full gap-2 sm:w-auto">
-                <Button
-                  variant="outline"
-                  onClick={quiz.toggleMark}
-                  className="flex-1 sm:flex-none"
+                <button
+                  type="button"
+                  onClick={toggleMark}
+                  aria-label={
+                    isMarked
+                      ? "Remove bookmark"
+                      : "Mark question"
+                  }
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition ${
+                    isMarked
+                      ? "border-amber-300 bg-amber-50 text-amber-600 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-400"
+                      : "border-slate-200 text-slate-500 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-400 dark:hover:bg-slate-800"
+                  }`}
                 >
                   <Flag
-                    className="mr-1.5 h-4 w-4"
+                    className="h-4 w-4"
                     fill={
                       isMarked
                         ? "currentColor"
                         : "none"
                     }
-                    aria-hidden="true"
                   />
-
-                  {isMarked
-                    ? "Unmark"
-                    : "Mark"}
-                </Button>
-
-                {isLastQuestion ? (
-                  <Button
-                    variant="danger"
-                    onClick={quiz.submit}
-                    className="flex-1 sm:flex-none"
-                  >
-                    <Send
-                      className="mr-1.5 h-4 w-4"
-                      aria-hidden="true"
-                    />
-
-                    Submit
-                  </Button>
-                ) : (
-                  <Button
-                    onClick={quiz.next}
-                    className="flex-1 sm:flex-none"
-                  >
-                    Next
-
-                    <ChevronRight
-                      className="ml-1 h-4 w-4"
-                      aria-hidden="true"
-                    />
-                  </Button>
-                )}
+                </button>
               </div>
-            </div>
 
-            {/* Mobile progress */}
-            <div className="mt-4 border-t border-slate-100 pt-3 dark:border-slate-800 sm:hidden">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-slate-500 dark:text-slate-400">
-                  {answeredCount} of{" "}
-                  {questions.length} answered
-                </span>
+              {/* Options */}
+              <div className="mt-7 space-y-3">
+                {current.options.map(
+                  (option, index) => {
+                    const optionId =
+                      String(index);
 
-                <span className="font-semibold text-slate-700 dark:text-slate-300">
-                  {Math.round(
-                    (answeredCount /
-                      questions.length) *
-                      100
-                  )}
-                  %
-                </span>
-              </div>
-            </div>
-          </div>
-        </main>
-
-        {/* Desktop question palette */}
-        <aside className="hidden lg:block">
-          <div
-            className="
-              sticky top-5 overflow-hidden rounded-3xl
-              border border-slate-200
-              bg-white
-              shadow-sm
-              dark:border-slate-800
-              dark:bg-slate-900
-            "
-          >
-            <div
-              className="
-                border-b border-slate-200
-                bg-slate-50/70
-                px-5 py-4
-                dark:border-slate-800
-                dark:bg-slate-950/40
-              "
-            >
-              <div className="flex items-center justify-between">
-                <div>
-                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                    Questions
-                  </h3>
-
-                  <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                    {answeredCount}/
-                    {questions.length} answered
-                  </p>
-                </div>
-
-                <div
-                  className="
-                    flex h-9 w-9 items-center justify-center
-                    rounded-xl
-                    bg-indigo-50
-                    text-xs font-black text-indigo-600
-                    dark:bg-indigo-500/10
-                    dark:text-indigo-400
-                  "
-                >
-                  {questions.length}
-                </div>
-              </div>
-            </div>
-
-            <div className="px-5 pt-5">
-              <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-slate-800">
-                <div
-                  className="h-full rounded-full bg-indigo-600 transition-all duration-300 dark:bg-indigo-500"
-                  style={{
-                    width: `${
-                      questions.length > 0
-                        ? (answeredCount /
-                            questions.length) *
-                          100
-                        : 0
-                    }%`,
-                  }}
-                />
-              </div>
-            </div>
-
-            <div className="p-5">
-              <div className="grid grid-cols-5 gap-2">
-                {questions.map(
-                  (question, index) => {
-                    const isCurrent =
-                      index ===
-                      quiz.currentIndex;
-
-                    const answer =
-                      quiz.answers[
-                        question.id
-                      ];
-
-                    const isAnswered =
-                      answer !== undefined &&
-                      answer !== null &&
-                      answer !== "";
-
-                    const questionMarked =
-                      quiz.marked.includes(
-                        question.id
-                      );
+                    const isSelected =
+                      selectedAnswer ===
+                      optionId;
 
                     return (
                       <button
-                        key={question.id}
+                        key={`${currentQuestionId}-${index}`}
                         type="button"
                         onClick={() =>
-                          quiz.goTo(index)
+                          choose(optionId)
                         }
-                        aria-label={`Go to question ${
-                          index + 1
-                        }${
-                          isAnswered
-                            ? ", answered"
-                            : ", unanswered"
-                        }${
-                          questionMarked
-                            ? ", marked for review"
-                            : ""
+                        className={`group flex w-full items-start gap-4 rounded-2xl border p-4 text-left transition ${
+                          isSelected
+                            ? "border-slate-900 bg-slate-50 ring-2 ring-slate-900/10 dark:border-white dark:bg-slate-800 dark:ring-white/10"
+                            : "border-slate-200 bg-white hover:border-slate-400 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-slate-500 dark:hover:bg-slate-800"
                         }`}
-                        aria-current={
-                          isCurrent
-                            ? "step"
-                            : undefined
-                        }
-                        className={`
-                          relative flex aspect-square
-                          items-center justify-center
-                          rounded-xl border
-                          text-sm font-bold
-                          transition-all duration-200
-                          focus:outline-none
-                          focus-visible:ring-2
-                          focus-visible:ring-indigo-500
-                          focus-visible:ring-offset-2
-                          dark:focus-visible:ring-offset-slate-900
-
-                          ${
-                            isCurrent
-                              ? "border-indigo-600 bg-indigo-600 text-white shadow-md shadow-indigo-500/20 dark:border-indigo-500 dark:bg-indigo-500"
-                              : isAnswered
-                                ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-400 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300"
-                                : "border-slate-200 bg-white text-slate-600 hover:border-indigo-300 hover:bg-indigo-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:border-indigo-500/60 dark:hover:bg-indigo-950/30"
-                          }
-                        `}
                       >
-                        {index + 1}
-
-                        {isAnswered &&
-                          !isCurrent && (
-                            <CheckCircle2
-                              className="
-                                absolute -right-1 -top-1
-                                h-4 w-4
-                                rounded-full
-                                bg-white
-                                text-emerald-500
-                                dark:bg-slate-900
-                              "
-                              aria-hidden="true"
-                            />
+                        <span
+                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border text-sm font-bold transition ${
+                            isSelected
+                              ? "border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900"
+                              : "border-slate-300 text-slate-600 dark:border-slate-600 dark:text-slate-300"
+                          }`}
+                        >
+                          {String.fromCharCode(
+                            65 + index
                           )}
+                        </span>
 
-                        {questionMarked && (
-                          <span
-                            className="
-                              absolute -bottom-1 -right-1
-                              flex h-4 w-4
-                              items-center justify-center
-                              rounded-full
-                              bg-amber-500
-                              text-white
-                              ring-2 ring-white
-                              dark:ring-slate-900
-                            "
-                          >
-                            <Flag
-                              className="h-2.5 w-2.5"
-                              fill="currentColor"
-                              aria-hidden="true"
-                            />
-                          </span>
-                        )}
+                        <span
+                          className={`pt-1 text-sm font-medium leading-6 ${
+                            isSelected
+                              ? "text-slate-900 dark:text-white"
+                              : "text-slate-700 dark:text-slate-300"
+                          }`}
+                        >
+                          {option}
+                        </span>
                       </button>
                     );
                   }
                 )}
               </div>
-            </div>
 
-            <div
-              className="
-                border-t border-slate-200
-                bg-slate-50/50
-                px-5 py-4
-                dark:border-slate-800
-                dark:bg-slate-950/30
-              "
-            >
-              <div className="grid grid-cols-2 gap-3 text-[11px]">
-                <Legend
-                  className="bg-indigo-600 dark:bg-indigo-500"
-                  label="Current"
-                />
+              {/* Navigation */}
+              <div className="mt-8 flex flex-col gap-3 border-t border-slate-200 pt-5 dark:border-slate-800 sm:flex-row sm:items-center sm:justify-between">
+                <button
+                  type="button"
+                  onClick={previous}
+                  disabled={
+                    currentIndex === 0
+                  }
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 px-5 py-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Previous
+                </button>
 
-                <Legend
-                  className="border border-emerald-200 bg-emerald-50 dark:border-emerald-900/60 dark:bg-emerald-950/30"
-                  label="Answered"
-                />
-
-                <Legend
-                  className="border border-slate-200 bg-white dark:border-slate-700 dark:bg-slate-900"
-                  label="Unanswered"
-                />
-
-                <Legend
-                  className="bg-amber-500"
-                  label="Marked"
-                />
+                {currentIndex <
+                validQuestions.length -
+                  1 ? (
+                  <button
+                    type="button"
+                    onClick={next}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-slate-200"
+                  >
+                    Next
+                    <ArrowRight className="h-4 w-4" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={submit}
+                    className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-semibold text-white transition hover:bg-emerald-700"
+                  >
+                    <CheckCircle2 className="h-4 w-4" />
+                    Submit Quiz
+                  </button>
+                )}
               </div>
             </div>
           </div>
+        </main>
+
+        {/* Question navigator */}
+        <aside className="lg:sticky lg:top-6 lg:self-start">
+          <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between">
+              <h3 className="font-bold text-slate-900 dark:text-white">
+                Questions
+              </h3>
+
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                {answeredCount}/
+                {validQuestions.length}
+              </span>
+            </div>
+
+            <div className="mt-4 grid grid-cols-5 gap-2 sm:grid-cols-8 lg:grid-cols-5">
+              {validQuestions.map(
+                (question, index) => {
+                  const questionId =
+                    getQuestionId(
+                      question
+                    );
+
+                  const answer =
+                    answers[questionId];
+
+                  const isAnswered =
+                    answer !== undefined &&
+                    answer !== "" &&
+                    Number.isInteger(
+                      Number(answer)
+                    ) &&
+                    Number(answer) >= 0 &&
+                    Number(answer) <= 3;
+
+                  const isCurrent =
+                    currentIndex === index;
+
+                  const isQuestionMarked =
+                    marked.includes(
+                      questionId
+                    );
+
+                  return (
+                    <button
+                      key={questionId}
+                      type="button"
+                      onClick={() =>
+                        goTo(index)
+                      }
+                      title={`Question ${
+                        index + 1
+                      }`}
+                      className={`relative flex h-10 items-center justify-center rounded-lg text-xs font-bold transition ${
+                        isCurrent
+                          ? "bg-slate-900 text-white ring-2 ring-slate-900/20 dark:bg-white dark:text-slate-900 dark:ring-white/20"
+                          : isAnswered
+                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400"
+                            : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                      }`}
+                    >
+                      {index + 1}
+
+                      {isQuestionMarked && (
+                        <span className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-amber-500 ring-2 ring-white dark:ring-slate-900" />
+                      )}
+                    </button>
+                  );
+                }
+              )}
+            </div>
+
+            <div className="mt-5 space-y-2 border-t border-slate-200 pt-4 text-xs dark:border-slate-800">
+              <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
+                <span className="h-3 w-3 rounded bg-emerald-100 dark:bg-emerald-950/40" />
+                Answered
+              </div>
+
+              <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
+                <span className="h-3 w-3 rounded bg-slate-100 dark:bg-slate-800" />
+                Not answered
+              </div>
+
+              <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
+                <span className="h-3 w-3 rounded bg-slate-900 dark:bg-white" />
+                Current
+              </div>
+
+              <div className="flex items-center gap-2 text-slate-600 dark:text-slate-400">
+                <span className="h-3 w-3 rounded-full bg-amber-500" />
+                Marked
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={submit}
+              className="mt-5 w-full rounded-xl border border-red-200 px-4 py-3 text-sm font-semibold text-red-600 transition hover:bg-red-50 dark:border-red-900/50 dark:hover:bg-red-950/30"
+            >
+              Submit Quiz
+            </button>
+          </div>
         </aside>
       </div>
-    </div>
-  );
-}
-
-function Legend({
-  className,
-  label,
-}: {
-  className: string;
-  label: string;
-}) {
-  return (
-    <div className="flex items-center gap-2">
-      <span
-        className={`h-3 w-3 shrink-0 rounded-full ${className}`}
-      />
-
-      <span className="font-medium text-slate-600 dark:text-slate-400">
-        {label}
-      </span>
     </div>
   );
 }

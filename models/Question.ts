@@ -8,25 +8,42 @@ import mongoose, {
 export interface IQuestion extends Document {
   question: string;
 
-  options: string[];
+  options: [
+    string,
+    string,
+    string,
+    string
+  ];
 
+  /**
+   * Zero-based answer index:
+   *
+   * A = 0
+   * B = 1
+   * C = 2
+   * D = 3
+   */
   correctAnswer: number;
 
   explanation: string;
 
-  // New MongoDB relationships
   examId: mongoose.Types.ObjectId;
 
   subjectId: mongoose.Types.ObjectId;
 
-  // Keep these temporarily for compatibility
+  /**
+   * Temporary compatibility/display fields.
+   */
   exam?: string;
 
   subject?: string;
 
   topic: string;
 
-  difficulty: "Easy" | "Medium" | "Hard";
+  difficulty:
+    | "Easy"
+    | "Medium"
+    | "Hard";
 
   isDailyQuiz: boolean;
 
@@ -37,147 +54,128 @@ export interface IQuestion extends Document {
   updatedAt: Date;
 }
 
-const QuestionSchema = new Schema<IQuestion>(
-  {
-    question: {
-      type: String,
-      required: true,
-      trim: true,
-    },
+const QuestionSchema =
+  new Schema<IQuestion>(
+    {
+      question: {
+        type: String,
+        required: true,
+        trim: true,
+      },
 
-    options: {
-      type: [String],
-      required: true,
+      options: {
+        type: [String],
+        required: true,
 
-      validate: {
-        validator: (value: string[]) =>
-          value.length === 4,
+        validate: {
+          validator: (
+            value: string[]
+          ) =>
+            Array.isArray(value) &&
+            value.length === 4 &&
+            value.every(
+              (item) =>
+                typeof item === "string" &&
+                item.trim().length > 0
+            ),
 
-        message:
-          "A question must have exactly 4 options.",
+          message:
+            "A question must have exactly 4 non-empty options.",
+        },
+      },
+
+      correctAnswer: {
+        type: Number,
+        required: true,
+        min: 0,
+        max: 3,
+
+        validate: {
+          validator: Number.isInteger,
+          message:
+            "Correct answer must be an integer between 0 and 3.",
+        },
+      },
+
+      explanation: {
+        type: String,
+        default: "",
+        trim: true,
+      },
+
+      examId: {
+        type: Schema.Types.ObjectId,
+        ref: "Exam",
+        required: true,
+        index: true,
+      },
+
+      subjectId: {
+        type: Schema.Types.ObjectId,
+        required: true,
+        index: true,
+      },
+
+      exam: {
+        type: String,
+        trim: true,
+      },
+
+      subject: {
+        type: String,
+        trim: true,
+      },
+
+      topic: {
+        type: String,
+        required: true,
+        trim: true,
+      },
+
+      difficulty: {
+        type: String,
+        enum: [
+          "Easy",
+          "Medium",
+          "Hard",
+        ],
+        default: "Medium",
+      },
+
+      isDailyQuiz: {
+        type: Boolean,
+        default: false,
+        index: true,
+      },
+
+      isActive: {
+        type: Boolean,
+        default: true,
+        index: true,
       },
     },
+    {
+      timestamps: true,
+    }
+  );
 
-    correctAnswer: {
-      type: Number,
-      required: true,
-      min: 0,
-      max: 3,
-    },
-
-    explanation: {
-      type: String,
-      default: "",
-      trim: true,
-    },
-
-    /*
-     * MongoDB Exam reference
-     */
-    examId: {
-      type: Schema.Types.ObjectId,
-      ref: "Exam",
-      required: true,
-      index: true,
-    },
-
-    /*
-     * MongoDB Subject reference
-     *
-     * This references:
-     *
-     * Exam.subjects._id
-     */
-    subjectId: {
-      type: Schema.Types.ObjectId,
-      required: true,
-      index: true,
-    },
-
-    /*
-     * Keep old fields temporarily.
-     *
-     * These can be removed after
-     * migrating your existing questions.
-     */
-    subject: {
-      type: String,
-      trim: true,
-    },
-
-    exam: {
-      type: String,
-      trim: true,
-    },
-
-    topic: {
-      type: String,
-      required: true,
-      trim: true,
-    },
-
-    difficulty: {
-      type: String,
-
-      enum: [
-        "Easy",
-        "Medium",
-        "Hard",
-      ],
-
-      default: "Medium",
-    },
-
-    isDailyQuiz: {
-      type: Boolean,
-      default: false,
-      index: true,
-    },
-
-    isActive: {
-      type: Boolean,
-      default: true,
-      index: true,
-    },
-  },
-
-  {
-    timestamps: true,
-  }
-);
-
-/*
- * Main query index
- *
- * Find questions by:
- * Exam → Subject → Topic
- */
 QuestionSchema.index({
   examId: 1,
   subjectId: 1,
   topic: 1,
 });
 
-/*
- * Useful for filtering questions
- */
 QuestionSchema.index({
   examId: 1,
   subjectId: 1,
   difficulty: 1,
 });
 
-/*
- * Daily quiz
- */
 QuestionSchema.index({
   isDailyQuiz: 1,
   isActive: 1,
 });
 
-/*
- * Backward compatibility index
- */
 QuestionSchema.index({
   subject: 1,
   topic: 1,
@@ -186,4 +184,7 @@ QuestionSchema.index({
 
 export const Question =
   models.Question ||
-  model<IQuestion>("Question", QuestionSchema);
+  model<IQuestion>(
+    "Question",
+    QuestionSchema
+  );

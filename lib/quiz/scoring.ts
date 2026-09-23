@@ -1,41 +1,67 @@
 import type { Question } from "@/types/question";
 
-export interface QuizResult {
-  score: number;
+export type QuizScore = {
   correct: number;
   wrong: number;
   skipped: number;
   total: number;
   percentage: number;
-}
+};
 
 export function scoreQuiz(
   questions: Question[],
   answers: Record<string, string>
-): QuizResult {
+): QuizScore {
   let correct = 0;
   let wrong = 0;
   let skipped = 0;
 
   for (const question of questions) {
-    const answer = answers[question.id];
+    const answer =
+      answers[question.id];
 
-    // No answer selected
-    if (answer === undefined || answer === null || answer === "") {
+    /*
+     * No answer.
+     */
+    if (
+      answer === undefined ||
+      answer === null ||
+      answer === ""
+    ) {
       skipped++;
       continue;
     }
 
-    const selectedIndex = Number(answer);
-    const correctAnswer = Number(
-      (question as { correctAnswer?: number | string }).correctAnswer
-    );
+    const selectedIndex =
+      Number(answer);
 
-    // Selected answer is correct
+    const correctAnswer =
+      Number(
+        question.correctAnswer
+      );
+
+    /*
+     * Invalid stored answer.
+     */
     if (
-      !Number.isNaN(selectedIndex) &&
-      !Number.isNaN(correctAnswer) &&
-      selectedIndex === correctAnswer
+      !Number.isInteger(
+        selectedIndex
+      ) ||
+      selectedIndex < 0 ||
+      selectedIndex > 3
+    ) {
+      wrong++;
+      continue;
+    }
+
+    /*
+     * Canonical comparison:
+     *
+     * selectedIndex === correctAnswer
+     */
+    if (
+      selectedIndex ===
+      correctAnswer
     ) {
       correct++;
     } else {
@@ -43,13 +69,18 @@ export function scoreQuiz(
     }
   }
 
-  const total = questions.length;
+  const total =
+    questions.length;
 
   const percentage =
-    total > 0 ? Math.round((correct / total) * 100) : 0;
+    total > 0
+      ? Math.round(
+          (correct / total) *
+            100
+        )
+      : 0;
 
   return {
-    score: correct,
     correct,
     wrong,
     skipped,

@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
+import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
+import { getServerSession } from "next-auth";
 
 import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongodb";
@@ -8,86 +8,178 @@ import { Question } from "@/models/Question";
 import { Exam } from "@/models/Exam";
 
 /**
- * Check admin authentication
+ * Check whether the current user is an admin.
  */
 async function checkAdmin() {
   const session = await getServerSession(authOptions);
 
   if (!session?.user) {
-    return null;
+    return {
+      authorized: false,
+      status: 401,
+      message: "Unauthorized. Please log in.",
+    };
   }
 
-  // Keep this as "admin" if your project only uses admin.
-  // Add other roles only if you actually use them.
   if (session.user.role !== "admin") {
-    return null;
+    return {
+      authorized: false,
+      status: 403,
+      message: "Forbidden. Admin access required.",
+    };
   }
 
-  return session;
+  return {
+    authorized: true,
+    status: 200,
+    message: "",
+  };
 }
 
 /**
  * GET /api/admin/questions
+ *
+ * Supported query parameters:
+ *
+ * ?search=
+ * ?examId=
+ * ?subjectId=
+ * ?topic=
+ * ?difficulty=
+ * ?isDailyQuiz=true
+ * ?isActive=true
  */
-export async function GET(request: Request) {
+export async function GET(request: NextRequest) {
   try {
-    const session = await checkAdmin();
+    const admin = await checkAdmin();
 
-    if (!session) {
+    if (!admin.authorized) {
       return NextResponse.json(
-        { message: "Unauthorized" },
-        { status: 401 }
+        {
+          success: false,
+          message: admin.message,
+        },
+        {
+          status: admin.status,
+        }
       );
     }
 
     await connectDB();
 
-    const { searchParams } = new URL(request.url);
+    const { searchParams } =
+      new URL(request.url);
 
-    const search = searchParams.get("search")?.trim() || "";
-    const examId = searchParams.get("examId")?.trim() || "";
-    const subjectId = searchParams.get("subjectId")?.trim() || "";
-    const topic = searchParams.get("topic")?.trim() || "";
-    const difficulty = searchParams.get("difficulty")?.trim() || "";
+    const search =
+      searchParams.get("search")?.trim() || "";
 
-    const isDailyQuiz = searchParams.get("isDailyQuiz");
-    const isActive = searchParams.get("isActive");
+    const examId =
+      searchParams.get("examId")?.trim() || "";
 
-    const filter: Record<string, unknown> = {};
+    const subjectId =
+      searchParams
+        .get("subjectId")
+        ?.trim() || "";
 
-    // Search
+    const topic =
+      searchParams.get("topic")?.trim() || "";
+
+    const difficulty =
+      searchParams
+        .get("difficulty")
+        ?.trim() || "";
+
+    const isDailyQuiz =
+      searchParams.get("isDailyQuiz");
+
+    const isActive =
+      searchParams.get("isActive");
+
+    const filter: Record<string, unknown> =
+      {};
+
+    /**
+     * Search question text, exam name,
+     * subject name and topic.
+     */
     if (search) {
-      filter.question = {
-        $regex: search,
-        $options: "i",
-      };
+      filter.$or = [
+        {
+          question: {
+            $regex: search,
+            $options: "i",
+          },
+        },
+        {
+          exam: {
+            $regex: search,
+            $options: "i",
+          },
+        },
+        {
+          subject: {
+            $regex: search,
+            $options: "i",
+          },
+        },
+        {
+          topic: {
+            $regex: search,
+            $options: "i",
+          },
+        },
+      ];
     }
 
-    // Exam
+    /**
+     * Filter by exam.
+     */
     if (examId) {
-      if (!mongoose.Types.ObjectId.isValid(examId)) {
+      if (
+        !mongoose.Types.ObjectId.isValid(
+          examId
+        )
+      ) {
         return NextResponse.json(
-          { message: "Invalid exam ID" },
+          {
+            success: false,
+            message: "Invalid examId.",
+          },
           { status: 400 }
         );
       }
 
-      filter.examId = new mongoose.Types.ObjectId(examId);
+      filter.examId =
+        new mongoose.Types.ObjectId(examId);
     }
 
-    // Subject
+    /**
+     * Filter by subject.
+     */
     if (subjectId) {
-      if (!mongoose.Types.ObjectId.isValid(subjectId)) {
+      if (
+        !mongoose.Types.ObjectId.isValid(
+          subjectId
+        )
+      ) {
         return NextResponse.json(
-          { message: "Invalid subject ID" },
+          {
+            success: false,
+            message: "Invalid subjectId.",
+          },
           { status: 400 }
         );
       }
 
-      filter.subjectId = new mongoose.Types.ObjectId(subjectId);
+      filter.subjectId =
+        new mongoose.Types.ObjectId(
+          subjectId
+        );
     }
 
-    // Topic
+    /**
+     * Filter by topic.
+     */
     if (topic) {
       filter.topic = {
         $regex: topic,
@@ -95,155 +187,323 @@ export async function GET(request: Request) {
       };
     }
 
-    // Difficulty
-    if (difficulty) {
-      if (!["Easy", "Medium", "Hard"].includes(difficulty)) {
-        return NextResponse.json(
-          { message: "Invalid difficulty" },
-          { status: 400 }
-        );
-      }
-
+    /**
+     * Filter by difficulty.
+     */
+    if (
+      difficulty &&
+      ["Easy", "Medium", "Hard"].includes(
+        difficulty
+      )
+    ) {
       filter.difficulty = difficulty;
     }
 
-    // Daily quiz
-    if (isDailyQuiz === "true" || isDailyQuiz === "false") {
-      filter.isDailyQuiz = isDailyQuiz === "true";
+    /**
+     * Filter by daily quiz.
+     */
+    if (isDailyQuiz === "true") {
+      filter.isDailyQuiz = true;
+    } else if (isDailyQuiz === "false") {
+      filter.isDailyQuiz = false;
     }
 
-    // Active
-    if (isActive === "true" || isActive === "false") {
-      filter.isActive = isActive === "true";
+    /**
+     * Filter by active status.
+     */
+    if (isActive === "true") {
+      filter.isActive = true;
+    } else if (isActive === "false") {
+      filter.isActive = false;
     }
 
-    const questions = await Question.find(filter)
-      .sort({ createdAt: -1 })
-      .lean();
+    const questions =
+      await Question.find(filter)
+        .sort({
+          createdAt: -1,
+        })
+        .lean();
 
     return NextResponse.json({
       success: true,
       questions,
+      count: questions.length,
     });
   } catch (error) {
-    console.error("GET QUESTIONS ERROR:", error);
+    console.error(
+      "GET /api/admin/questions error:",
+      error
+    );
 
     return NextResponse.json(
       {
         success: false,
-        message: "Failed to fetch questions",
+        message:
+          "Failed to fetch questions.",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }
 
 /**
  * POST /api/admin/questions
+ *
+ * Creates a new question.
+ *
+ * Correct answer convention:
+ *
+ * A = 0
+ * B = 1
+ * C = 2
+ * D = 3
  */
-export async function POST(request: Request) {
+export async function POST(
+  request: NextRequest
+) {
   try {
-    const session = await checkAdmin();
+    const admin = await checkAdmin();
 
-    if (!session) {
+    if (!admin.authorized) {
       return NextResponse.json(
         {
           success: false,
-          message: "Unauthorized",
+          message: admin.message,
         },
-        { status: 401 }
+        {
+          status: admin.status,
+        }
       );
     }
 
     await connectDB();
 
-    const body = await request.json();
+    let body: unknown;
 
-    console.log(
-      "=========================================="
-    );
-    console.log("CREATE QUESTION REQUEST");
-    console.log(body);
-    console.log(
-      "=========================================="
-    );
-
-    const {
-      question,
-      options,
-      correctAnswer,
-      explanation,
-      examId,
-      subjectId,
-      topic,
-      difficulty,
-      isDailyQuiz,
-      isActive,
-    } = body;
-
-    // -----------------------------------------
-    // Question
-    // -----------------------------------------
+    try {
+      body = await request.json();
+    } catch {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid JSON request body.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
 
     if (
-      typeof question !== "string" ||
-      !question.trim()
+      !body ||
+      typeof body !== "object"
     ) {
       return NextResponse.json(
         {
           success: false,
-          message: "Question text is required",
+          message: "Invalid request body.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
-    // -----------------------------------------
-    // Options
-    // -----------------------------------------
+    const data = body as Record<
+      string,
+      unknown
+    >;
 
-    if (
-      !Array.isArray(options) ||
-      options.length !== 4
-    ) {
+    const question =
+      typeof data.question === "string"
+        ? data.question.trim()
+        : "";
+
+    const options =
+      Array.isArray(data.options)
+        ? data.options
+        : [];
+
+    const explanation =
+      typeof data.explanation === "string"
+        ? data.explanation.trim()
+        : "";
+
+    const examId =
+      typeof data.examId === "string"
+        ? data.examId.trim()
+        : "";
+
+    const subjectId =
+      typeof data.subjectId === "string"
+        ? data.subjectId.trim()
+        : "";
+
+    const topic =
+      typeof data.topic === "string"
+        ? data.topic.trim()
+        : "";
+
+    const difficulty =
+      typeof data.difficulty === "string"
+        ? data.difficulty.trim()
+        : "Medium";
+
+    /**
+     * Boolean values.
+     *
+     * Boolean("false") would incorrectly become true,
+     * so explicitly handle string values as well.
+     */
+    const isDailyQuiz =
+      data.isDailyQuiz === true ||
+      data.isDailyQuiz === "true" ||
+      data.isDailyQuiz === 1 ||
+      data.isDailyQuiz === "1";
+
+    const isActive =
+      data.isActive === undefined
+        ? true
+        : data.isActive === true ||
+          data.isActive === "true" ||
+          data.isActive === 1 ||
+          data.isActive === "1";
+
+    /**
+     * -----------------------------------------
+     * Validate question
+     * -----------------------------------------
+     */
+    if (!question) {
       return NextResponse.json(
         {
           success: false,
           message:
-            "A question must have exactly 4 options",
-          received: options,
+            "Question is required.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
-    const cleanOptions = options.map(
-      (option: unknown) =>
+    /**
+     * -----------------------------------------
+     * Validate exactly 4 options
+     * -----------------------------------------
+     */
+    if (options.length !== 4) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Exactly 4 options are required.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    const cleanOptions =
+      options.map((option) =>
         typeof option === "string"
           ? option.trim()
           : ""
-    );
+      );
 
-    if (cleanOptions.some((option) => !option)) {
+    const hasEmptyOption =
+      cleanOptions.some(
+        (option) => !option
+      );
+
+    if (hasEmptyOption) {
       return NextResponse.json(
         {
           success: false,
           message:
-            "All 4 options must contain text",
-          options: cleanOptions,
+            "All 4 options are required.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
-    // -----------------------------------------
-    // Correct Answer
-    // -----------------------------------------
+    /**
+     * -----------------------------------------
+     * Validate correctAnswer
+     * -----------------------------------------
+     *
+     * IMPORTANT:
+     *
+     * The entire application uses:
+     *
+     * A = 0
+     * B = 1
+     * C = 2
+     * D = 3
+     *
+     * Convert the incoming value explicitly
+     * because HTML forms can send numbers as
+     * strings.
+     */
+    const rawCorrectAnswer =
+      data.correctAnswer;
 
-    const parsedCorrectAnswer = Number(correctAnswer);
+    let parsedCorrectAnswer: number;
 
     if (
-      !Number.isInteger(parsedCorrectAnswer) ||
+      typeof rawCorrectAnswer === "number"
+    ) {
+      parsedCorrectAnswer =
+        rawCorrectAnswer;
+    } else if (
+      typeof rawCorrectAnswer === "string" &&
+      rawCorrectAnswer.trim() !== ""
+    ) {
+      parsedCorrectAnswer = Number(
+        rawCorrectAnswer.trim()
+      );
+    } else {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Correct answer is required. Select A, B, C, or D.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    /**
+     * Must be an actual integer.
+     */
+    if (
+      !Number.isInteger(
+        parsedCorrectAnswer
+      )
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Correct answer must be an integer.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    /**
+     * Only 0–3 are valid.
+     */
+    if (
       parsedCorrectAnswer < 0 ||
       parsedCorrectAnswer > 3
     ) {
@@ -251,256 +511,294 @@ export async function POST(request: Request) {
         {
           success: false,
           message:
-            "Correct answer must be an integer between 0 and 3",
-          received: correctAnswer,
+            "Correct answer must be between 0 and 3. A=0, B=1, C=2, D=3.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
-    // -----------------------------------------
-    // Exam
-    // -----------------------------------------
-
+    /**
+     * -----------------------------------------
+     * Validate examId
+     * -----------------------------------------
+     */
     if (!examId) {
       return NextResponse.json(
         {
           success: false,
-          message: "Exam is required",
+          message: "Exam is required.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
     if (
-      !mongoose.Types.ObjectId.isValid(examId)
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Invalid exam ID",
-          received: examId,
-        },
-        { status: 400 }
-      );
-    }
-
-    // -----------------------------------------
-    // Subject
-    // -----------------------------------------
-
-    if (!subjectId) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Subject is required",
-        },
-        { status: 400 }
-      );
-    }
-
-    if (
-      !mongoose.Types.ObjectId.isValid(subjectId)
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Invalid subject ID",
-          received: subjectId,
-        },
-        { status: 400 }
-      );
-    }
-
-    // -----------------------------------------
-    // Topic
-    // -----------------------------------------
-
-    if (
-      typeof topic !== "string" ||
-      !topic.trim()
-    ) {
-      return NextResponse.json(
-        {
-          success: false,
-          message: "Topic is required",
-        },
-        { status: 400 }
-      );
-    }
-
-    // -----------------------------------------
-    // Difficulty
-    // -----------------------------------------
-
-    const finalDifficulty =
-      typeof difficulty === "string" &&
-      difficulty.trim()
-        ? difficulty.trim()
-        : "Medium";
-
-    if (
-      !["Easy", "Medium", "Hard"].includes(
-        finalDifficulty
+      !mongoose.Types.ObjectId.isValid(
+        examId
       )
     ) {
       return NextResponse.json(
         {
           success: false,
-          message: "Invalid difficulty",
-          received: difficulty,
+          message: "Invalid exam ID.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
-    // -----------------------------------------
-    // Find Exam
-    // -----------------------------------------
+    /**
+     * -----------------------------------------
+     * Validate subjectId
+     * -----------------------------------------
+     */
+    if (!subjectId) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Subject is required.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
 
-    const exam = await Exam.findById(examId);
+    if (
+      !mongoose.Types.ObjectId.isValid(
+        subjectId
+      )
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Invalid subject ID.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    /**
+     * -----------------------------------------
+     * Validate topic
+     * -----------------------------------------
+     */
+    if (!topic) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Topic is required.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    /**
+     * -----------------------------------------
+     * Validate difficulty
+     * -----------------------------------------
+     */
+    if (
+      !["Easy", "Medium", "Hard"].includes(
+        difficulty
+      )
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Difficulty must be Easy, Medium, or Hard.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    /**
+     * -----------------------------------------
+     * Find exam
+     * -----------------------------------------
+     */
+    const exam =
+      await Exam.findById(examId).lean();
 
     if (!exam) {
       return NextResponse.json(
         {
           success: false,
-          message: "Exam not found",
-          examId,
+          message:
+            "Selected exam was not found.",
         },
-        { status: 404 }
+        {
+          status: 404,
+        }
       );
     }
 
-    // -----------------------------------------
-    // Find Subject inside Exam
-    // -----------------------------------------
+    /**
+     * -----------------------------------------
+     * Find subject inside selected exam
+     * -----------------------------------------
+     *
+     * Your Subject records are embedded inside
+     * Exam.subjects.
+     */
+    const subjects =
+      Array.isArray(exam.subjects)
+        ? exam.subjects
+        : [];
 
-    const subject = exam.subjects?.find(
-      (item: any) =>
-        item._id?.toString() === subjectId
-    );
+    const subject =
+      subjects.find(
+        (item: { _id?: string | mongoose.Types.ObjectId }) =>
+          String(item._id) ===
+          String(subjectId)
+      );
 
     if (!subject) {
       return NextResponse.json(
         {
           success: false,
           message:
-            "Selected subject does not belong to this exam",
-
-          examId,
-
-          subjectId,
-
-          availableSubjects:
-            exam.subjects?.map((item: any) => ({
-              _id: item._id?.toString(),
-              name: item.name,
-              slug: item.slug,
-            })) || [],
+            "Selected subject was not found inside the selected exam.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
-    // -----------------------------------------
-    // Create Question
-    // -----------------------------------------
+    /**
+     * -----------------------------------------
+     * Create question
+     * -----------------------------------------
+     */
+    const newQuestion =
+      await Question.create({
+        question,
 
-    const newQuestion = await Question.create({
-      question: question.trim(),
+        options: cleanOptions,
 
-      options: cleanOptions,
+        /**
+         * ALWAYS save a number.
+         *
+         * A = 0
+         * B = 1
+         * C = 2
+         * D = 3
+         */
+        correctAnswer:
+          parsedCorrectAnswer,
 
-      correctAnswer: parsedCorrectAnswer,
+        explanation,
 
-      explanation:
-        typeof explanation === "string"
-          ? explanation.trim()
-          : "",
+        examId: exam._id,
 
-      // MongoDB relationship
-      examId: exam._id,
+        subjectId:
+          subject._id,
 
-      subjectId: subject._id,
+        /**
+         * Keep legacy fields for compatibility
+         * with existing question-list/search code.
+         */
+        exam:
+          typeof exam.name === "string"
+            ? exam.name
+            : "",
 
-      // Backward compatibility
-      exam: exam.name,
+        subject:
+          typeof subject.name === "string"
+            ? subject.name
+            : "",
 
-      subject: subject.name,
+        topic,
 
-      topic: topic.trim(),
+        difficulty:
+          difficulty as
+            | "Easy"
+            | "Medium"
+            | "Hard",
 
-      difficulty: finalDifficulty,
+        isDailyQuiz,
 
-      isDailyQuiz:
-        typeof isDailyQuiz === "boolean"
-          ? isDailyQuiz
-          : false,
-
-      isActive:
-        typeof isActive === "boolean"
-          ? isActive
-          : true,
-    });
-
-    console.log(
-      "QUESTION CREATED:",
-      newQuestion._id.toString()
-    );
+        isActive,
+      });
 
     return NextResponse.json(
       {
         success: true,
         message:
-          "Question created successfully",
+          "Question created successfully.",
         question: newQuestion,
       },
-      { status: 201 }
-    );
-  } catch (error: any) {
-    console.error(
-      "=========================================="
-    );
-    console.error(
-      "CREATE QUESTION ERROR:"
-    );
-    console.error(error);
-    console.error(
-      "=========================================="
-    );
-
-    // Mongoose validation error
-    if (error?.name === "ValidationError") {
-      const errors: Record<string, string> = {};
-
-      for (const [field, value] of Object.entries(
-        error.errors || {}
-      )) {
-        errors[field] =
-          (value as any)?.message ||
-          "Invalid value";
+      {
+        status: 201,
       }
+    );
+  } catch (error) {
+    console.error(
+      "POST /api/admin/questions error:",
+      error
+    );
+
+    /**
+     * Handle Mongoose validation errors
+     * with a useful message.
+     */
+    if (
+      error instanceof mongoose.Error.ValidationError
+    ) {
+      const messages = Object.values(
+        error.errors
+      ).map(
+        (item) => item.message
+      );
 
       return NextResponse.json(
         {
           success: false,
           message:
-            "Question validation failed",
-          errors,
+            messages.join(", ") ||
+            "Question validation failed.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
-    // Duplicate key
-    if (error?.code === 11000) {
+    /**
+     * Handle duplicate key errors.
+     */
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      (error as { code?: number }).code ===
+        11000
+    ) {
       return NextResponse.json(
         {
           success: false,
-          message: "Duplicate key error",
-          details: error.keyValue || {},
+          message:
+            "A question with the same unique value already exists.",
         },
-        { status: 400 }
+        {
+          status: 409,
+        }
       );
     }
 
@@ -508,10 +806,11 @@ export async function POST(request: Request) {
       {
         success: false,
         message:
-          error?.message ||
-          "Failed to create question",
+          "Failed to create question.",
       },
-      { status: 500 }
+      {
+        status: 500,
+      }
     );
   }
 }

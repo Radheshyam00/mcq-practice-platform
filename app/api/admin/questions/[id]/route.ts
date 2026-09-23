@@ -1,6 +1,6 @@
-import { NextResponse } from "next/server";
-import { getServerSession } from "next-auth";
+import { NextRequest, NextResponse } from "next/server";
 import mongoose from "mongoose";
+import { getServerSession } from "next-auth";
 
 import { authOptions } from "@/lib/auth";
 import { connectDB } from "@/lib/mongodb";
@@ -13,271 +13,694 @@ type RouteContext = {
   }>;
 };
 
+/**
+ * Check whether the current user is an admin.
+ */
 async function checkAdmin() {
   const session = await getServerSession(authOptions);
 
-  if (!session?.user || session.user.role !== "admin") {
-    return null;
+  if (!session?.user) {
+    return {
+      authorized: false,
+      status: 401,
+      message: "Unauthorized. Please log in.",
+    };
   }
 
-  return session;
+  if (session.user.role !== "admin") {
+    return {
+      authorized: false,
+      status: 403,
+      message: "Forbidden. Admin access required.",
+    };
+  }
+
+  return {
+    authorized: true,
+    status: 200,
+    message: "",
+  };
+}
+
+/**
+ * Convert different boolean representations into
+ * a real boolean.
+ */
+function parseBoolean(
+  value: unknown,
+  defaultValue: boolean
+): boolean {
+  if (typeof value === "boolean") {
+    return value;
+  }
+
+  if (typeof value === "number") {
+    if (value === 1) return true;
+    if (value === 0) return false;
+  }
+
+  if (typeof value === "string") {
+    const normalized = value
+      .trim()
+      .toLowerCase();
+
+    if (
+      normalized === "true" ||
+      normalized === "1" ||
+      normalized === "yes" ||
+      normalized === "y"
+    ) {
+      return true;
+    }
+
+    if (
+      normalized === "false" ||
+      normalized === "0" ||
+      normalized === "no" ||
+      normalized === "n"
+    ) {
+      return false;
+    }
+  }
+
+  return defaultValue;
 }
 
 /**
  * GET /api/admin/questions/[id]
+ *
+ * Get a single question.
  */
 export async function GET(
-  _request: Request,
+  request: NextRequest,
   context: RouteContext
 ) {
   try {
-    const session = await checkAdmin();
+    const admin = await checkAdmin();
 
-    if (!session) {
+    if (!admin.authorized) {
       return NextResponse.json(
-        { message: "Unauthorized" },
-        { status: 401 }
+        {
+          success: false,
+          message: admin.message,
+        },
+        {
+          status: admin.status,
+        }
       );
     }
 
     const { id } = await context.params;
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!id) {
       return NextResponse.json(
-        { message: "Invalid question ID" },
-        { status: 400 }
+        {
+          success: false,
+          message: "Question ID is required.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    if (
+      !mongoose.Types.ObjectId.isValid(id)
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid question ID.",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
     await connectDB();
 
-    const question = await Question.findById(id).lean();
+    const question =
+      await Question.findById(id).lean();
 
     if (!question) {
       return NextResponse.json(
-        { message: "Question not found" },
-        { status: 404 }
+        {
+          success: false,
+          message: "Question not found.",
+        },
+        {
+          status: 404,
+        }
       );
     }
 
     return NextResponse.json({
+      success: true,
       question,
     });
   } catch (error) {
-    console.error("GET question error:", error);
+    console.error(
+      "GET /api/admin/questions/[id] error:",
+      error
+    );
 
     return NextResponse.json(
-      { message: "Failed to fetch question" },
-      { status: 500 }
+      {
+        success: false,
+        message:
+          "Failed to fetch question.",
+      },
+      {
+        status: 500,
+      }
     );
   }
 }
 
 /**
  * PUT /api/admin/questions/[id]
+ *
+ * Update a question.
+ *
+ * Correct answer convention:
+ *
+ * A = 0
+ * B = 1
+ * C = 2
+ * D = 3
  */
 export async function PUT(
-  request: Request,
+  request: NextRequest,
   context: RouteContext
 ) {
   try {
-    const session = await checkAdmin();
+    const admin = await checkAdmin();
 
-    if (!session) {
+    if (!admin.authorized) {
       return NextResponse.json(
-        { message: "Unauthorized" },
-        { status: 401 }
+        {
+          success: false,
+          message: admin.message,
+        },
+        {
+          status: admin.status,
+        }
       );
     }
 
     const { id } = await context.params;
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!id) {
       return NextResponse.json(
-        { message: "Invalid question ID" },
-        { status: 400 }
+        {
+          success: false,
+          message: "Question ID is required.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    if (
+      !mongoose.Types.ObjectId.isValid(id)
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid question ID.",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
     await connectDB();
 
-    const body = await request.json();
+    let body: unknown;
 
-    const {
-      question,
-      options,
-      correctAnswer,
-      explanation,
-      examId,
-      subjectId,
-      topic,
-      difficulty,
-      isDailyQuiz,
-      isActive,
-    } = body;
-
-    // -----------------------------
-    // Basic validation
-    // -----------------------------
-
-    if (!question?.trim()) {
+    try {
+      body = await request.json();
+    } catch {
       return NextResponse.json(
-        { message: "Question text is required" },
-        { status: 400 }
+        {
+          success: false,
+          message: "Invalid JSON request body.",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
     if (
-      !Array.isArray(options) ||
-      options.length !== 4 ||
-      options.some(
-        (option) =>
-          typeof option !== "string" || !option.trim()
+      !body ||
+      typeof body !== "object"
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid request body.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    const data = body as Record<
+      string,
+      unknown
+    >;
+
+    /**
+     * -----------------------------------------
+     * Basic fields
+     * -----------------------------------------
+     */
+    const question =
+      typeof data.question === "string"
+        ? data.question.trim()
+        : "";
+
+    const explanation =
+      typeof data.explanation === "string"
+        ? data.explanation.trim()
+        : "";
+
+    const examId =
+      typeof data.examId === "string"
+        ? data.examId.trim()
+        : "";
+
+    const subjectId =
+      typeof data.subjectId === "string"
+        ? data.subjectId.trim()
+        : "";
+
+    const topic =
+      typeof data.topic === "string"
+        ? data.topic.trim()
+        : "";
+
+    const difficulty =
+      typeof data.difficulty === "string"
+        ? data.difficulty.trim()
+        : "Medium";
+
+    /**
+     * -----------------------------------------
+     * Validate question
+     * -----------------------------------------
+     */
+    if (!question) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Question is required.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    /**
+     * -----------------------------------------
+     * Validate options
+     * -----------------------------------------
+     */
+    if (
+      !Array.isArray(data.options)
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Options must be an array.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    if (data.options.length !== 4) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Exactly 4 options are required.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    const cleanOptions =
+      data.options.map((option) =>
+        typeof option === "string"
+          ? option.trim()
+          : ""
+      );
+
+    const hasEmptyOption =
+      cleanOptions.some(
+        (option) => !option
+      );
+
+    if (hasEmptyOption) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "All 4 options are required.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    /**
+     * -----------------------------------------
+     * Validate correctAnswer
+     * -----------------------------------------
+     *
+     * Accept a number or numeric string from
+     * the frontend, then normalize it.
+     *
+     * A = 0
+     * B = 1
+     * C = 2
+     * D = 3
+     */
+    const rawCorrectAnswer =
+      data.correctAnswer;
+
+    let parsedCorrectAnswer: number;
+
+    if (
+      typeof rawCorrectAnswer === "number"
+    ) {
+      parsedCorrectAnswer =
+        rawCorrectAnswer;
+    } else if (
+      typeof rawCorrectAnswer === "string" &&
+      rawCorrectAnswer.trim() !== ""
+    ) {
+      parsedCorrectAnswer = Number(
+        rawCorrectAnswer.trim()
+      );
+    } else {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Correct answer is required. Select A, B, C, or D.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    if (
+      !Number.isInteger(
+        parsedCorrectAnswer
       )
     ) {
       return NextResponse.json(
         {
+          success: false,
           message:
-            "A question must have exactly 4 non-empty options",
+            "Correct answer must be an integer.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
     if (
-      typeof correctAnswer !== "number" ||
-      correctAnswer < 0 ||
-      correctAnswer > 3
+      parsedCorrectAnswer < 0 ||
+      parsedCorrectAnswer > 3
     ) {
       return NextResponse.json(
         {
+          success: false,
           message:
-            "Correct answer must be a number between 0 and 3",
+            "Correct answer must be between 0 and 3. A=0, B=1, C=2, D=3.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
+    /**
+     * -----------------------------------------
+     * Validate examId
+     * -----------------------------------------
+     */
     if (!examId) {
       return NextResponse.json(
-        { message: "Exam is required" },
-        { status: 400 }
-      );
-    }
-
-    if (!subjectId) {
-      return NextResponse.json(
-        { message: "Subject is required" },
-        { status: 400 }
-      );
-    }
-
-    if (!mongoose.Types.ObjectId.isValid(examId)) {
-      return NextResponse.json(
-        { message: "Invalid exam ID" },
-        { status: 400 }
-      );
-    }
-
-    if (!mongoose.Types.ObjectId.isValid(subjectId)) {
-      return NextResponse.json(
-        { message: "Invalid subject ID" },
-        { status: 400 }
-      );
-    }
-
-    if (!topic?.trim()) {
-      return NextResponse.json(
-        { message: "Topic is required" },
-        { status: 400 }
+        {
+          success: false,
+          message: "Exam is required.",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
     if (
-      !["Easy", "Medium", "Hard"].includes(difficulty)
+      !mongoose.Types.ObjectId.isValid(
+        examId
+      )
     ) {
       return NextResponse.json(
-        { message: "Invalid difficulty" },
-        { status: 400 }
+        {
+          success: false,
+          message: "Invalid exam ID.",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
-    // -----------------------------
-    // Verify exam
-    // -----------------------------
+    /**
+     * -----------------------------------------
+     * Validate subjectId
+     * -----------------------------------------
+     */
+    if (!subjectId) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Subject is required.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
 
-    const exam = await Exam.findById(examId);
+    if (
+      !mongoose.Types.ObjectId.isValid(
+        subjectId
+      )
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Invalid subject ID.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    /**
+     * -----------------------------------------
+     * Validate topic
+     * -----------------------------------------
+     */
+    if (!topic) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Topic is required.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    /**
+     * -----------------------------------------
+     * Validate difficulty
+     * -----------------------------------------
+     */
+    if (
+      !["Easy", "Medium", "Hard"].includes(
+        difficulty
+      )
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Difficulty must be Easy, Medium, or Hard.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    /**
+     * -----------------------------------------
+     * Find selected exam
+     * -----------------------------------------
+     */
+    const exam =
+      await Exam.findById(examId).lean();
 
     if (!exam) {
       return NextResponse.json(
-        { message: "Exam not found" },
-        { status: 404 }
+        {
+          success: false,
+          message:
+            "Selected exam was not found.",
+        },
+        {
+          status: 404,
+        }
       );
     }
 
-    // -----------------------------
-    // Verify subject belongs to exam
-    // -----------------------------
+    /**
+     * -----------------------------------------
+     * Find selected subject inside exam
+     * -----------------------------------------
+     */
+    const subjects: Array<{
+      _id?: string | { toString(): string };
+      name?: string;
+    }> = Array.isArray(exam.subjects)
+      ? exam.subjects
+      : [];
 
-    const subject = exam.subjects.find(
-      (item: { _id: { toString: () => string } }) =>
-        item._id.toString() === subjectId
+    const subject = subjects.find(
+      (item: {
+        _id?: string | { toString(): string };
+        name?: string;
+      }) =>
+        String(item._id) === String(subjectId)
     );
 
     if (!subject) {
       return NextResponse.json(
         {
+          success: false,
           message:
-            "Selected subject does not belong to this exam",
+            "Selected subject was not found inside the selected exam.",
         },
-        { status: 400 }
+        {
+          status: 400,
+        }
       );
     }
 
-    // -----------------------------
-    // Update question
-    // -----------------------------
+    /**
+     * -----------------------------------------
+     * Parse boolean fields
+     * -----------------------------------------
+     */
+    const isDailyQuiz = parseBoolean(
+      data.isDailyQuiz,
+      false
+    );
 
+    const isActive = parseBoolean(
+      data.isActive,
+      true
+    );
+
+    /**
+     * -----------------------------------------
+     * Update question
+     * -----------------------------------------
+     */
     const updatedQuestion =
       await Question.findByIdAndUpdate(
         id,
         {
-          question: question.trim(),
+          $set: {
+            question,
 
-          options: options.map(
-            (option: string) => option.trim()
-          ),
+            options: cleanOptions,
 
-          correctAnswer,
+            /**
+             * Always save numeric zero-based
+             * answer index.
+             *
+             * A = 0
+             * B = 1
+             * C = 2
+             * D = 3
+             */
+            correctAnswer:
+              parsedCorrectAnswer,
 
-          explanation:
-            typeof explanation === "string"
-              ? explanation.trim()
-              : "",
+            explanation,
 
-          examId: exam._id,
+            /**
+             * New relationship fields.
+             */
+            examId: exam._id,
 
-          subjectId: subject._id,
+            subjectId:
+              subject._id,
 
-          // Keep old fields temporarily
-          // for backward compatibility.
-          exam: exam.name,
+            /**
+             * Legacy compatibility fields.
+             */
+            exam:
+              typeof exam.name === "string"
+                ? exam.name
+                : "",
 
-          subject: subject.name,
+            subject:
+              typeof subject.name ===
+              "string"
+                ? subject.name
+                : "",
 
-          topic: topic.trim(),
+            topic,
 
-          difficulty,
+            difficulty:
+              difficulty as
+                | "Easy"
+                | "Medium"
+                | "Hard",
 
-          isDailyQuiz:
-            typeof isDailyQuiz === "boolean"
-              ? isDailyQuiz
-              : false,
+            isDailyQuiz,
 
-          isActive:
-            typeof isActive === "boolean"
-              ? isActive
-              : true,
+            isActive,
+          },
         },
         {
           new: true,
@@ -287,72 +710,176 @@ export async function PUT(
 
     if (!updatedQuestion) {
       return NextResponse.json(
-        { message: "Question not found" },
-        { status: 404 }
+        {
+          success: false,
+          message:
+            "Question not found.",
+        },
+        {
+          status: 404,
+        }
       );
     }
 
     return NextResponse.json({
-      message: "Question updated successfully",
+      success: true,
+      message:
+        "Question updated successfully.",
       question: updatedQuestion,
     });
   } catch (error) {
-    console.error("PUT question error:", error);
+    console.error(
+      "PUT /api/admin/questions/[id] error:",
+      error
+    );
+
+    /**
+     * Mongoose validation error.
+     */
+    if (
+      error instanceof
+      mongoose.Error.ValidationError
+    ) {
+      const messages = Object.values(
+        error.errors
+      ).map(
+        (item) => item.message
+      );
+
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            messages.join(", ") ||
+            "Question validation failed.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    /**
+     * Invalid ObjectId.
+     */
+    if (
+      error instanceof
+      mongoose.Error.CastError
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message:
+            "Invalid question, exam, or subject ID.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
 
     return NextResponse.json(
-      { message: "Failed to update question" },
-      { status: 500 }
+      {
+        success: false,
+        message:
+          "Failed to update question.",
+      },
+      {
+        status: 500,
+      }
     );
   }
 }
 
 /**
  * DELETE /api/admin/questions/[id]
+ *
+ * Delete a question.
  */
 export async function DELETE(
-  _request: Request,
+  request: NextRequest,
   context: RouteContext
 ) {
   try {
-    const session = await checkAdmin();
+    const admin = await checkAdmin();
 
-    if (!session) {
+    if (!admin.authorized) {
       return NextResponse.json(
-        { message: "Unauthorized" },
-        { status: 401 }
+        {
+          success: false,
+          message: admin.message,
+        },
+        {
+          status: admin.status,
+        }
       );
     }
 
     const { id } = await context.params;
 
-    if (!mongoose.Types.ObjectId.isValid(id)) {
+    if (!id) {
       return NextResponse.json(
-        { message: "Invalid question ID" },
-        { status: 400 }
+        {
+          success: false,
+          message: "Question ID is required.",
+        },
+        {
+          status: 400,
+        }
+      );
+    }
+
+    if (
+      !mongoose.Types.ObjectId.isValid(id)
+    ) {
+      return NextResponse.json(
+        {
+          success: false,
+          message: "Invalid question ID.",
+        },
+        {
+          status: 400,
+        }
       );
     }
 
     await connectDB();
 
-    const question =
-      await Question.findByIdAndDelete(id);
+    const deletedQuestion =
+      await Question.findByIdAndDelete(id).lean();
 
-    if (!question) {
+    if (!deletedQuestion) {
       return NextResponse.json(
-        { message: "Question not found" },
-        { status: 404 }
+        {
+          success: false,
+          message: "Question not found.",
+        },
+        {
+          status: 404,
+        }
       );
     }
 
     return NextResponse.json({
-      message: "Question deleted successfully",
+      success: true,
+      message:
+        "Question deleted successfully.",
     });
   } catch (error) {
-    console.error("DELETE question error:", error);
+    console.error(
+      "DELETE /api/admin/questions/[id] error:",
+      error
+    );
 
     return NextResponse.json(
-      { message: "Failed to delete question" },
-      { status: 500 }
+      {
+        success: false,
+        message:
+          "Failed to delete question.",
+      },
+      {
+        status: 500,
+      }
     );
   }
 }
